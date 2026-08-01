@@ -51,21 +51,6 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
-    buildTypes {
-        getByName("release") {
-            isMinifyEnabled = false
-            val releaseSignConfig = signingConfigs.findByName("release")
-            if (releaseSignConfig != null) {
-                signingConfig = releaseSignConfig
-            }
-        }
-        create("daily") {
-            initWith(getByName("release"))
-            applicationIdSuffix = ".daily"
-            versionNameSuffix = "-daily"
-            matchingFallbacks += listOf("release")
-        }
-    }
     signingConfigs {
         val signStorePath = when {
             signPath != null -> File(signPath)
@@ -79,6 +64,18 @@ android {
                 storeFile = signStorePath
                 storePassword = signStorePassword
             }
+        }
+    }
+    buildTypes {
+        getByName("release") {
+            isMinifyEnabled = false
+            signingConfigs.findByName("release")?.let { signingConfig = it }
+        }
+        create("daily") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".daily"
+            versionNameSuffix = "-daily"
+            matchingFallbacks += listOf("release")
         }
     }
     buildFeatures {
