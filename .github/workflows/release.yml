@@ -26,7 +26,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Decode signing key
-        run: echo "${{ secrets.SIGNING_KEY }}" | base64 -d > $HOME/signing_key.jks
+        run: |
+          printf '%s' "${{ secrets.SIGNING_KEY }}" | base64 --decode > "$HOME/signing_key.jks"
+          test -s "$HOME/signing_key.jks"
 
       - name: Assemble APK
         run: |
