@@ -5,8 +5,6 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Rect
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import android.view.Gravity
 import android.view.View
@@ -19,7 +17,12 @@ import com.storyteller_f.divedeep.shared.OverlayRenderer
 import com.storyteller_f.divedeep.shared.ScreenTextNode
 import com.storyteller_f.divedeep.shared.TextBounds
 import com.storyteller_f.divedeep.shared.TranslationFrame
-import com.storyteller_f.divedeep.shared.TranslationItem
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 
 class AndroidOverlayRenderer(
     private val service: AccessibilityService,
@@ -42,81 +45,154 @@ class AndroidOverlayRenderer(
         const val BUTTON_LOADING_COLOR = 0xE0F59E0B.toInt()
     }
 
-    private val mainHandler = Handler(Looper.getMainLooper())
+    private data class ButtonUiState(
+        val nodeId: String,
+        val nodeText: String,
+        val bounds: Rect,
+        val translated: Boolean,
+    )
+
+    private data class SheetUiState(
+        val sourceText: String,
+        val targetLanguage: String,
+        val translatedText: String?,
+    )
+
+    private data class OverlayUiState(
+        val buttons: List<ButtonUiState> = emptyList(),
+        val sheet: SheetUiState? = null,
+    )
+
+    private val computeDispatcher = Dispatchers.Default.limitedParallelism(1)
+    private val rendererScope = CoroutineScope(SupervisorJob() + computeDispatcher)
+    private val uiState = MutableStateFlow(OverlayUiState())
     private val windowManager = service.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val previousButtonPositions = mutableMapOf<String, Rect>()
     private val buttonViews = mutableMapOf<String, Button>()
     private var sheetView: View? = null
+
+    @Volatile
     private var selectedNodeId: String? = null
 
+    @Volatile
+    private var latestFrame: TranslationFrame? = null
+
+    init {
+        rendererScope.launch(Dispatchers.Main.immediate) {
+            uiState.collect(::applyUiState)
+        }
+    }
+
     override fun render(frame: TranslationFrame) {
-        mainHandler.post {
-            Log.i(TAG, "render frame target=${frame.targetLanguage} items=${frame.items.size}")
-            frame.items.take(PREVIEW_LOG_LIMIT).forEach { item ->
-                Log.i(TAG, "translation node=${item.nodeId} text=${item.translatedText}")
-            }
-            if (frame.nodes.isEmpty() && buttonViews.isEmpty() && sheetView == null) return@post
-
-            val translatedByNodeId = frame.items.associateBy { it.nodeId }
-            val overlayBounds = overlayBounds()
-            val activeNodeIds = mutableSetOf<String>()
-            frame.nodes.forEach { node ->
-                val buttonBounds = buttonBoundsFor(node, overlayBounds) ?: return@forEach
-                activeNodeIds += node.id
-                showButton(node, translatedByNodeId[node.id], buttonBounds) {
-                    selectedNodeId = node.id
-                    render(frame)
-                }
-            }
-            removeStaleButtons(activeNodeIds)
-
-            val selectedNode = selectedNodeId?.let { nodeId ->
-                frame.nodes.firstOrNull { it.id == nodeId }
-            }
-            if (selectedNode == null) {
-                selectedNodeId = null
-                hideSheet()
-            } else {
-                Log.i(TAG, "bottom sheet node=${selectedNode.id}")
-                showSheet(frame, selectedNode, translatedByNodeId[selectedNode.id])
-            }
+        latestFrame = frame
+        rendererScope.launch {
+            uiState.value = computeUiState(frame)
         }
     }
 
     override fun clear() {
-        mainHandler.post {
-            removeStaleButtons(emptySet())
-            hideSheet()
+        rendererScope.launch {
             selectedNodeId = null
             previousButtonPositions.clear()
+            uiState.value = OverlayUiState()
+        }
+    }
+
+    fun close() {
+        rendererScope.cancel()
+    }
+
+    private fun computeUiState(frame: TranslationFrame): OverlayUiState {
+        Log.i(TAG, "render frame target=${frame.targetLanguage} items=${frame.items.size}")
+        frame.items.take(PREVIEW_LOG_LIMIT).forEach { item ->
+            Log.i(TAG, "translation node=${item.nodeId} text=${item.translatedText}")
+        }
+
+        val translatedByNodeId = frame.items.associateBy { it.nodeId }
+        val overlayBounds = overlayBounds()
+        val buttons = frame.nodes.mapNotNull { node ->
+            val buttonBounds = buttonBoundsFor(node, overlayBounds) ?: return@mapNotNull null
+            ButtonUiState(
+                nodeId = node.id,
+                nodeText = node.text,
+                bounds = buttonBounds,
+                translated = translatedByNodeId[node.id] != null,
+            )
+        }
+
+        val selectedNode = selectedNodeId?.let { nodeId ->
+            frame.nodes.firstOrNull { it.id == nodeId }
+        }
+        if (selectedNode == null) {
+            selectedNodeId = null
+            return OverlayUiState(buttons = buttons)
+        }
+
+        Log.i(TAG, "bottom sheet node=${selectedNode.id}")
+        return OverlayUiState(
+            buttons = buttons,
+            sheet = SheetUiState(
+                sourceText = selectedNode.text,
+                targetLanguage = frame.targetLanguage,
+                translatedText = translatedByNodeId[selectedNode.id]?.translatedText,
+            ),
+        )
+    }
+
+    private fun onButtonClicked(nodeId: String) {
+        selectedNodeId = nodeId
+        val frame = latestFrame ?: return
+        rendererScope.launch {
+            uiState.value = computeUiState(frame)
+        }
+    }
+
+    private fun isIdle(state: OverlayUiState): Boolean =
+        state.buttons.isEmpty() && state.sheet == null && buttonViews.isEmpty() && sheetView == null
+
+    private fun applyUiState(state: OverlayUiState) {
+        if (isIdle(state)) return
+
+        val activeNodeIds = mutableSetOf<String>()
+        state.buttons.forEach { buttonState ->
+            activeNodeIds += buttonState.nodeId
+            showButton(buttonState) {
+                onButtonClicked(buttonState.nodeId)
+            }
+        }
+        removeStaleButtons(activeNodeIds)
+
+        val sheetState = state.sheet
+        if (sheetState == null) {
+            hideSheet()
+        } else {
+            showSheet(sheetState)
         }
     }
 
     private fun showButton(
-        node: ScreenTextNode,
-        item: TranslationItem?,
-        bounds: Rect,
+        state: ButtonUiState,
         onClick: () -> Unit,
     ) {
-        val existing = buttonViews[node.id]
+        val existing = buttonViews[state.nodeId]
         if (existing != null) {
-            updateButton(existing, node, item)
+            updateButton(existing, state)
             existing.setOnClickListener { onClick() }
             val params = existing.layoutParams as WindowManager.LayoutParams
-            if (params.x != bounds.left || params.y != bounds.top) {
-                params.x = bounds.left
-                params.y = bounds.top
+            if (params.x != state.bounds.left || params.y != state.bounds.top) {
+                params.x = state.bounds.left
+                params.y = state.bounds.top
                 windowManager.updateViewLayout(existing, params)
             }
             return
         }
 
-        val button = translationButton(node, item, onClick)
-        windowManager.addView(button, overlayParams(bounds.width(), bounds.height()).apply {
-            x = bounds.left
-            y = bounds.top
+        val button = translationButton(state, onClick)
+        windowManager.addView(button, overlayParams(state.bounds.width(), state.bounds.height()).apply {
+            x = state.bounds.left
+            y = state.bounds.top
         })
-        buttonViews[node.id] = button
+        buttonViews[state.nodeId] = button
     }
 
     private fun removeStaleButtons(activeNodeIds: Set<String>) {
@@ -130,13 +206,9 @@ class AndroidOverlayRenderer(
         }
     }
 
-    private fun showSheet(
-        frame: TranslationFrame,
-        node: ScreenTextNode,
-        item: TranslationItem?,
-    ) {
+    private fun showSheet(state: SheetUiState) {
         hideSheet()
-        val sheet = bottomSheet(frame, node, item)
+        val sheet = bottomSheet(state)
         sheet.setPadding(SHEET_MARGIN, 0, SHEET_MARGIN, SHEET_MARGIN)
         windowManager.addView(
             sheet,
@@ -166,8 +238,7 @@ class AndroidOverlayRenderer(
         }
 
     private fun translationButton(
-        node: ScreenTextNode,
-        item: TranslationItem?,
+        state: ButtonUiState,
         onClick: () -> Unit,
     ): Button =
         Button(service).apply {
@@ -178,33 +249,28 @@ class AndroidOverlayRenderer(
             setPadding(0, 0, 0, 0)
             textSize = BUTTON_TEXT_SIZE_SP
             setTextColor(Color.WHITE)
-            updateButton(this, node, item)
+            updateButton(this, state)
             setOnClickListener { onClick() }
         }
 
     private fun updateButton(
         button: Button,
-        node: ScreenTextNode,
-        item: TranslationItem?,
+        state: ButtonUiState,
     ) {
-        button.text = if (item == null) "翻译中" else "已翻译"
-        button.setBackgroundColor(if (item == null) BUTTON_LOADING_COLOR else BUTTON_DONE_COLOR)
-        button.contentDescription = "${node.text} ${button.text}"
+        button.text = if (state.translated) "已翻译" else "翻译中"
+        button.setBackgroundColor(if (state.translated) BUTTON_DONE_COLOR else BUTTON_LOADING_COLOR)
+        button.contentDescription = "${state.nodeText} ${button.text}"
     }
 
-    private fun bottomSheet(
-        frame: TranslationFrame,
-        node: ScreenTextNode,
-        item: TranslationItem?,
-    ): View =
+    private fun bottomSheet(state: SheetUiState): View =
         LinearLayout(service).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(SHEET_BACKGROUND_COLOR)
             setPadding(SHEET_PADDING, SHEET_PADDING, SHEET_PADDING, SHEET_PADDING)
             addView(sheetText("原文", SHEET_TITLE_SIZE_SP, SHEET_SOURCE_COLOR))
-            addView(sheetText(node.text, SHEET_BODY_SIZE_SP, SHEET_SOURCE_COLOR))
-            addView(sheetText("目标语言 ${frame.targetLanguage}", SHEET_TITLE_SIZE_SP, SHEET_SOURCE_COLOR))
-            addView(sheetText(item?.translatedText ?: "翻译中", SHEET_BODY_SIZE_SP, SHEET_TRANSLATION_COLOR))
+            addView(sheetText(state.sourceText, SHEET_BODY_SIZE_SP, SHEET_SOURCE_COLOR))
+            addView(sheetText("目标语言 ${state.targetLanguage}", SHEET_TITLE_SIZE_SP, SHEET_SOURCE_COLOR))
+            addView(sheetText(state.translatedText ?: "翻译中", SHEET_BODY_SIZE_SP, SHEET_TRANSLATION_COLOR))
         }
 
     private fun sheetText(
