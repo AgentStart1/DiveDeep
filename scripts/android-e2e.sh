@@ -212,6 +212,25 @@ fixture_dump_contains() {
   adb_cmd shell cat /sdcard/divedeep-window.xml | tr -d '\r' | grep -Fq "text=\"${expected}\""
 }
 
+overlay_window_is_present() {
+  local windows
+  windows="$(adb_cmd shell dumpsys window windows | tr -d '\r')"
+  awk -v package="$APP_PACKAGE" '
+    /^  Window #[0-9]+ Window\{/ {
+      if (in_window && is_package && is_overlay) found = 1
+      in_window = 1
+      is_package = 0
+      is_overlay = 0
+    }
+    in_window && index($0, "package=" package) { is_package = 1 }
+    in_window && index($0, "ty=ACCESSIBILITY_OVERLAY") { is_overlay = 1 }
+    END {
+      if (in_window && is_package && is_overlay) found = 1
+      exit !found
+    }
+  ' <<<"$windows"
+}
+
 tap_title_translation_button() {
   local bounds
   local left
@@ -262,6 +281,28 @@ assert_fixture_remains_interactive() {
       exit 1
     fi
   done
+}
+
+assert_overlay_removed_after_service_destroy() {
+  if ! overlay_window_is_present; then
+    echo "Expected an overlay window before destroying the accessibility service." >&2
+    adb_cmd shell dumpsys window windows >&2
+    exit 1
+  fi
+
+  restore_setting enabled_accessibility_services "$OLD_SERVICES"
+  restore_setting accessibility_enabled "$OLD_ACCESSIBILITY_ENABLED"
+
+  for _ in $(seq 1 10); do
+    if ! overlay_window_is_present; then
+      return
+    fi
+    sleep 1
+  done
+
+  echo "DiveDeep overlay remained after the accessibility service was destroyed." >&2
+  adb_cmd shell dumpsys window windows >&2
+  exit 1
 }
 
 cleanup() {
@@ -339,5 +380,7 @@ if ! grep -Fq 'bottom sheet node=com.storyteller_f.divedeep.fixture:id/title_tex
   echo "DiveDeep translation bottom sheet did not open after tapping the overlay button." >&2
   exit 1
 fi
+
+assert_overlay_removed_after_service_destroy
 
 echo "DiveDeep Android E2E passed."

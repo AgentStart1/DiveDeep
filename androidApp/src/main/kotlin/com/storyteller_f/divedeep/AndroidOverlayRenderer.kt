@@ -100,6 +100,8 @@ class AndroidOverlayRenderer(
 
     fun close() {
         rendererScope.cancel()
+        removeStaleButtons(emptySet())
+        hideSheet()
     }
 
     private fun computeUiState(frame: TranslationFrame): OverlayUiState {
