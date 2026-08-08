@@ -26,6 +26,7 @@ class DiveDeepAccessibilityService : AccessibilityService() {
     private lateinit var engine: DiveDeepEngine
     private lateinit var accessibilityCaptureDriver: AndroidAccessibilityCaptureDriver
     private lateinit var translationService: ConfiguredTranslationService
+    private lateinit var overlayRenderer: AndroidOverlayRenderer
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val refreshRequests = Channel<RefreshRequest>(Channel.CONFLATED)
     private val refreshRevision = MutableStateFlow(0L)
@@ -42,7 +43,7 @@ class DiveDeepAccessibilityService : AccessibilityService() {
     override fun onCreate() {
         super.onCreate()
         accessibilityCaptureDriver = AndroidAccessibilityCaptureDriver { rootInActiveWindow }
-        val overlayRenderer = AndroidOverlayRenderer(this)
+        overlayRenderer = AndroidOverlayRenderer(this)
         translationService = ConfiguredTranslationService(this) {
             settings.value.translationConfig
         }
@@ -98,6 +99,7 @@ class DiveDeepAccessibilityService : AccessibilityService() {
         refreshRequests.close()
         serviceScope.cancel()
         engine.stop()
+        overlayRenderer.close()
         translationService.close()
         super.onDestroy()
     }
