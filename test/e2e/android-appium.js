@@ -56,6 +56,38 @@ async function findByText(sessionId, text) {
   }
 }
 
+async function swipeUp(sessionId) {
+  await swipeVertically(sessionId, 0.83, 0.2);
+}
+
+async function swipeVertically(sessionId, startFraction, endFraction) {
+  const rect = await request(sessionId, 'GET', '/window/rect', null);
+  await request(sessionId, 'POST', '/actions', {
+    actions: [{
+      type: 'pointer',
+      id: 'finger',
+      parameters: { pointerType: 'touch' },
+      actions: [
+        {
+          type: 'pointerMove',
+          duration: 0,
+          x: Math.round(rect.width * 0.5),
+          y: Math.round(rect.height * startFraction),
+        },
+        { type: 'pointerDown', button: 0 },
+        { type: 'pause', duration: 100 },
+        {
+          type: 'pointerMove',
+          duration: 600,
+          x: Math.round(rect.width * 0.5),
+          y: Math.round(rect.height * endFraction),
+        },
+        { type: 'pointerUp', button: 0 },
+      ],
+    }],
+  });
+}
+
 async function findByResourceId(sessionId, resourceId) {
   try {
     const element = await request(sessionId, 'POST', '/element', {
@@ -92,5 +124,6 @@ module.exports = {
   deleteSession,
   findByResourceId,
   findByText,
+  swipeUp,
   waitUntil,
 };

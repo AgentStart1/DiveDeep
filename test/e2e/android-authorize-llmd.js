@@ -6,13 +6,22 @@ const {
   waitUntil,
 } = require('./android-appium');
 
-const LLMD_PACKAGE = 'com.storytellerf.llmd';
-const LLMD_AUTH_ACTIVITY = '.LlmdIpcAuthorizationActivity';
+const LLMD_PACKAGES = {
+  release: 'com.storytellerf.llmd',
+  daily: 'com.storytellerf.llmd.daily',
+  debug: 'com.storytellerf.llmd.debug',
+};
+const LLMD_VARIANT = process.env.LLMD_VARIANT || 'release';
+const LLMD_PACKAGE = LLMD_PACKAGES[LLMD_VARIANT];
+const LLMD_AUTH_ACTIVITY = 'com.storytellerf.llmd.LlmdIpcAuthorizationActivity';
 const AUTH_ACTION = 'com.storytellerf.llmd.action.AUTHORIZE_CALLER';
 const CALLER_PACKAGE = 'com.storyteller_f.divedeep';
 const ALLOW_BUTTON_ID = 'com.storytellerf.llmd:id/ipc_authorization_allow';
 
 async function main() {
+  if (!LLMD_PACKAGE) {
+    throw new Error(`LLMD_VARIANT must be release, daily, or debug: ${LLMD_VARIANT}`);
+  }
   const sessionId = await createSession({
     'appium:appPackage': LLMD_PACKAGE,
     'appium:appActivity': LLMD_AUTH_ACTIVITY,

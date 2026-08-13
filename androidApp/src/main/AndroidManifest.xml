@@ -10,6 +10,8 @@
 
     <queries>
         <package android:name="com.storytellerf.llmd" />
+        <package android:name="com.storytellerf.llmd.daily" />
+        <package android:name="com.storytellerf.llmd.debug" />
     </queries>
 
     <application
