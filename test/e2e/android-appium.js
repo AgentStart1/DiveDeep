@@ -56,6 +56,21 @@ async function findByText(sessionId, text) {
   }
 }
 
+async function findByClassName(sessionId, className) {
+  try {
+    const element = await request(sessionId, 'POST', '/element', {
+      using: '-android uiautomator',
+      value: `new UiSelector().className("${className}")`,
+    });
+    return element[ELEMENT_KEY] || element.ELEMENT;
+  } catch (error) {
+    if (error.status === 404) {
+      return null;
+    }
+    throw error;
+  }
+}
+
 async function swipeUp(sessionId) {
   await swipeVertically(sessionId, 0.83, 0.2);
 }
@@ -122,6 +137,7 @@ module.exports = {
   click,
   createSession,
   deleteSession,
+  findByClassName,
   findByResourceId,
   findByText,
   swipeUp,

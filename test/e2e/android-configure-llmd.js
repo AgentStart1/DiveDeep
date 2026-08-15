@@ -2,6 +2,7 @@ const {
   click,
   createSession,
   deleteSession,
+  findByClassName,
   findByText,
   swipeUp,
 } = require('./android-appium');
@@ -39,11 +40,29 @@ async function main() {
   });
 
   try {
+    // Select local IPC backend first to ensure llmd variant options are visible
+    const localIpcText = '本机 llmd IPC';
+    const localIpcOption = await findTextWithScroll(sessionId, localIpcText);
+    if (localIpcOption) {
+      const localIpcRadio = await findByClassName(sessionId, 'android.widget.RadioButton');
+      if (localIpcRadio) {
+        await click(sessionId, localIpcRadio);
+      } else {
+        await click(sessionId, localIpcOption);
+      }
+    }
+
+    // Click the radio button for the target llmd variant
     const target = await findTextWithScroll(sessionId, targetLabel);
     if (!target) {
       throw new Error(`DiveDeep llmd target option did not appear: ${targetLabel}`);
     }
-    await click(sessionId, target);
+    const targetRadio = await findByClassName(sessionId, 'android.widget.RadioButton');
+    if (targetRadio) {
+      await click(sessionId, targetRadio);
+    } else {
+      await click(sessionId, target);
+    }
 
     const saveText = '保存翻译配置';
     const saveButton = await findTextWithScroll(sessionId, saveText);
