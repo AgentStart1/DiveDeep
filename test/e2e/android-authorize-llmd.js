@@ -3,6 +3,9 @@ const {
   createSession,
   deleteSession,
   findByResourceId,
+  generateReport,
+  startRecording,
+  stopRecording,
   waitUntil,
 } = require('./android-appium');
 
@@ -22,17 +25,25 @@ async function main() {
   if (!LLMD_PACKAGE) {
     throw new Error(`LLMD_VARIANT must be release, daily, or debug: ${LLMD_VARIANT}`);
   }
-  const sessionId = await createSession({
-    'appium:appPackage': LLMD_PACKAGE,
-    'appium:appActivity': LLMD_AUTH_ACTIVITY,
-    'appium:intentAction': AUTH_ACTION,
-    'appium:optionalIntentArguments': `--es caller_package ${CALLER_PACKAGE}`,
-    'appium:noReset': true,
-    'appium:forceAppLaunch': true,
-    'appium:newCommandTimeout': 120,
-  });
+
+  const testName = 'android-authorize-llmd';
+  const startTime = Date.now();
+  let sessionId;
 
   try {
+    sessionId = await createSession({
+      'appium:appPackage': LLMD_PACKAGE,
+      'appium:appActivity': LLMD_AUTH_ACTIVITY,
+      'appium:intentAction': AUTH_ACTION,
+      'appium:optionalIntentArguments': `--es caller_package ${CALLER_PACKAGE}`,
+      'appium:noReset': true,
+      'appium:forceAppLaunch': true,
+      'appium:newCommandTimeout': 120,
+    });
+
+    // Start recording
+    await startRecording(sessionId);
+
     await waitUntil(
       async () => Boolean(await findByResourceId(sessionId, ALLOW_BUTTON_ID)),
       {
@@ -43,8 +54,33 @@ async function main() {
     );
     const allowButton = await findByResourceId(sessionId, ALLOW_BUTTON_ID);
     await click(sessionId, allowButton);
+
+    // Stop recording and generate report
+    const videoData = await stopRecording(sessionId);
+    const duration = Date.now() - startTime;
+    const reportDir = generateReport(testName, {
+      status: 'passed',
+      duration,
+    });
+
+    // Save video file
+    const fs = require('fs');
+    const path = require('path');
+    fs.writeFileSync(path.join(reportDir, 'recording.mp4'), videoData);
+
+    console.log(`Test passed. Report generated at: ${reportDir}`);
+  } catch (error) {
+    // Generate failed report
+    const duration = Date.now() - startTime;
+    generateReport(testName, {
+      status: 'failed',
+      duration,
+    });
+    throw error;
   } finally {
-    await deleteSession(sessionId);
+    if (sessionId) {
+      await deleteSession(sessionId);
+    }
   }
 }
 

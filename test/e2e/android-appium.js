@@ -133,6 +133,46 @@ async function waitUntil(predicate, { timeout, interval, timeoutMsg }) {
   throw new Error(timeoutMsg);
 }
 
+async function startRecording(sessionId) {
+  await request(sessionId, 'POST', '/session/:sessionId/appium/start_recording_screen', {
+    options: {
+      videoType: 'mpeg4',
+      videoQuality: 'medium',
+    },
+  });
+}
+
+async function stopRecording(sessionId) {
+  const result = await request(sessionId, 'POST', '/session/:sessionId/appium/stop_recording_screen', {
+    options: {},
+  });
+  return Buffer.from(result, 'base64');
+}
+
+function generateReport(testName, { status, duration }) {
+  const fs = require('fs');
+  const path = require('path');
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const reportDir = path.join(__dirname, 'reports', `${testName}-${timestamp}`);
+  fs.mkdirSync(reportDir, { recursive: true });
+
+  const report = {
+    testName,
+    status,
+    duration,
+    timestamp: new Date().toISOString(),
+  };
+
+  fs.writeFileSync(
+    path.join(reportDir, 'report.json'),
+    JSON.stringify(report, null, 2)
+  );
+
+  console.log(`Report generated: ${path.join(reportDir, 'report.json')}`);
+  return reportDir;
+}
+
 module.exports = {
   click,
   createSession,
@@ -140,6 +180,9 @@ module.exports = {
   findByClassName,
   findByResourceId,
   findByText,
+  generateReport,
+  startRecording,
+  stopRecording,
   swipeUp,
   waitUntil,
 };
