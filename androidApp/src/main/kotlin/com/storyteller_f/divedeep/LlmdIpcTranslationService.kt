@@ -33,12 +33,13 @@ class LlmdIpcTranslationService(
     private val bindingMutex = Mutex()
     private var service: ILlmdService? = null
     private var bound = false
+    private var boundTarget: LlmdTarget? = null
     private var pendingBinding: CompletableDeferred<ILlmdService>? = null
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             bindingScope.launch {
                 bindingMutex.withLock {
-                    if (!bound) return@withLock
+                    if (!bound || name?.packageName != boundTarget?.packageName) return@withLock
 
                     val connectedService = ILlmdService.Stub.asInterface(binder)
                     service = connectedService
@@ -50,13 +51,19 @@ class LlmdIpcTranslationService(
 
         override fun onServiceDisconnected(name: ComponentName?) {
             bindingScope.launch {
-                clearBinding(TranslationException("Local llmd IPC service disconnected"))
+                clearBindingIfCurrentTarget(
+                    name,
+                    TranslationException("Local llmd IPC service disconnected"),
+                )
             }
         }
 
         override fun onBindingDied(name: ComponentName?) {
             bindingScope.launch {
-                clearBinding(TranslationException("Local llmd IPC service binding died"))
+                clearBindingIfCurrentTarget(
+                    name,
+                    TranslationException("Local llmd IPC service binding died"),
+                )
             }
         }
     }
@@ -70,25 +77,32 @@ class LlmdIpcTranslationService(
         }
 
         val payload = OpenAiTranslationProtocol.buildChatCompletionPayload(config, request)
-        val responseBody = requestChatCompletion(payload.toString())
+        val responseBody = requestChatCompletion(config.llmdTarget, payload.toString())
         val content = OpenAiTranslationProtocol.extractContent(responseBody)
         val translatedTexts = OpenAiTranslationProtocol.parseTranslations(content, request.items.size)
         return OpenAiTranslationProtocol.toTranslationItems(request, translatedTexts)
     }
 
-    suspend fun health(): String = requestIpc { callback ->
-        requireService().healthAsync(callback)
+    suspend fun health(): String {
+        val target = configProvider().llmdTarget
+        return requestIpc(target) { callback ->
+            requireService(target).healthAsync(callback)
+        }
     }
 
-    private suspend fun requestChatCompletion(requestJson: String): String = requestIpc { callback ->
-        requireService().chatCompletionAsync(requestJson, callback)
-    }
+    private suspend fun requestChatCompletion(target: LlmdTarget, requestJson: String): String =
+        requestIpc(target) { callback ->
+            requireService(target).chatCompletionAsync(requestJson, callback)
+        }
 
-    private suspend fun requestIpc(call: suspend (ILlmdChatCallback) -> Unit): String =
+    private suspend fun requestIpc(
+        target: LlmdTarget,
+        call: suspend (ILlmdChatCallback) -> Unit,
+    ): String =
         try {
             requestAsync(call)
         } catch (error: RemoteException) {
-            clearBinding(error)
+            clearBindingIfCurrentTarget(target, error)
             throw TranslationException("Local llmd IPC request failed: ${error.message.orEmpty()}", error)
         }
 
@@ -114,10 +128,13 @@ class LlmdIpcTranslationService(
         }
     }
 
-    private suspend fun requireService(): ILlmdService {
+    private suspend fun requireService(target: LlmdTarget): ILlmdService {
         val binding = bindingMutex.withLock {
+            if (boundTarget != target) {
+                clearBindingLocked(TranslationException("Local llmd IPC target changed"))
+            }
             service?.let { return it }
-            pendingBinding ?: startBindingLocked()
+            pendingBinding ?: startBindingLocked(target)
         }
         return try {
             withTimeout(BIND_TIMEOUT_MILLIS) { binding.await() }
@@ -127,16 +144,19 @@ class LlmdIpcTranslationService(
         }
     }
 
-    private fun startBindingLocked(): CompletableDeferred<ILlmdService> {
+    private fun startBindingLocked(target: LlmdTarget): CompletableDeferred<ILlmdService> {
         val binding = CompletableDeferred<ILlmdService>()
         pendingBinding = binding
         val intent = Intent(ACTION_BIND_IPC)
-            .setComponent(ComponentName(LLMD_PACKAGE, LLMD_SERVICE_CLASS))
+            .setComponent(ComponentName(target.packageName, LlmdTarget.SERVICE_CLASS_NAME))
         if (appContext.bindService(intent, connection, Context.BIND_AUTO_CREATE)) {
             bound = true
+            boundTarget = target
         } else {
             pendingBinding = null
-            binding.completeExceptionally(TranslationException("Local llmd IPC service is unavailable"))
+            binding.completeExceptionally(
+                TranslationException("Local llmd ${target.displayName} IPC service is unavailable"),
+            )
         }
         return binding
     }
@@ -152,6 +172,22 @@ class LlmdIpcTranslationService(
     private suspend fun clearBinding(cause: Throwable) {
         bindingMutex.withLock {
             clearBindingLocked(cause)
+        }
+    }
+
+    private suspend fun clearBindingIfCurrentTarget(name: ComponentName?, cause: Throwable) {
+        bindingMutex.withLock {
+            if (name?.packageName == boundTarget?.packageName) {
+                clearBindingLocked(cause)
+            }
+        }
+    }
+
+    private suspend fun clearBindingIfCurrentTarget(target: LlmdTarget, cause: Throwable) {
+        bindingMutex.withLock {
+            if (target == boundTarget) {
+                clearBindingLocked(cause)
+            }
         }
     }
 
@@ -180,14 +216,13 @@ class LlmdIpcTranslationService(
             runCatching { appContext.unbindService(connection) }
             bound = false
         }
+        boundTarget = null
     }
 
     companion object {
         const val ACTION_AUTHORIZE_CALLER = "com.storytellerf.llmd.action.AUTHORIZE_CALLER"
         const val ACTION_BIND_IPC = "com.storytellerf.llmd.action.BIND_IPC"
         const val EXTRA_CALLER_PACKAGE = "caller_package"
-        const val LLMD_PACKAGE = "com.storytellerf.llmd"
-        const val LLMD_SERVICE_CLASS = "com.storytellerf.llmd.LlmdIpcService"
         private const val BIND_TIMEOUT_MILLIS = 10_000L
         private const val REQUEST_TIMEOUT_MILLIS = 120_000L
     }

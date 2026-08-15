@@ -24,6 +24,7 @@ object DiveDeepState {
     private val enabledKey = booleanPreferencesKey("enabled")
     private val blockedPackagesKey = stringSetPreferencesKey("blocked_packages")
     private val backendKey = stringPreferencesKey("backend")
+    private val llmdTargetKey = stringPreferencesKey("llmd_target")
     private val apiBaseUrlKey = stringPreferencesKey("api_base_url")
     private val modelKey = stringPreferencesKey("model")
     private val apiKeyKey = stringPreferencesKey("api_key")
@@ -94,6 +95,7 @@ object DiveDeepState {
     suspend fun setTranslationConfig(context: Context, config: TranslationConfig) {
         context.applicationContext.diveDeepDataStore.edit { preferences ->
             preferences[backendKey] = config.backend.preferenceValue
+            preferences[llmdTargetKey] = config.llmdTarget.preferenceValue
             preferences[apiBaseUrlKey] = config.apiBaseUrl.ifBlank { DEFAULT_API_BASE_URL }
             preferences[modelKey] = config.model.ifBlank { DEFAULT_MODEL }
             preferences[apiKeyKey] = config.apiKey
@@ -107,6 +109,7 @@ object DiveDeepState {
             blockedPackages = this[blockedPackagesKey].orEmpty(),
             translationConfig = TranslationConfig(
                 backend = TranslationBackend.fromPreference(this[backendKey]),
+                llmdTarget = LlmdTarget.fromPreference(this[llmdTargetKey]),
                 apiBaseUrl = this[apiBaseUrlKey]?.takeIf { it.isNotBlank() } ?: DEFAULT_API_BASE_URL,
                 model = this[modelKey]?.takeIf { it.isNotBlank() } ?: DEFAULT_MODEL,
                 apiKey = this[apiKeyKey].orEmpty(),
@@ -143,6 +146,7 @@ data class DiveDeepSettings(
 
 data class TranslationConfig(
     val backend: TranslationBackend = TranslationBackend.LocalLlmdIpc,
+    val llmdTarget: LlmdTarget = LlmdTarget.Release,
     val apiBaseUrl: String = DiveDeepState.DEFAULT_API_BASE_URL,
     val model: String = DiveDeepState.DEFAULT_MODEL,
     val apiKey: String = "",

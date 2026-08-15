@@ -56,6 +56,53 @@ async function findByText(sessionId, text) {
   }
 }
 
+async function findByClassName(sessionId, className) {
+  try {
+    const element = await request(sessionId, 'POST', '/element', {
+      using: '-android uiautomator',
+      value: `new UiSelector().className("${className}")`,
+    });
+    return element[ELEMENT_KEY] || element.ELEMENT;
+  } catch (error) {
+    if (error.status === 404) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function swipeUp(sessionId) {
+  await swipeVertically(sessionId, 0.83, 0.2);
+}
+
+async function swipeVertically(sessionId, startFraction, endFraction) {
+  const rect = await request(sessionId, 'GET', '/window/rect', null);
+  await request(sessionId, 'POST', '/actions', {
+    actions: [{
+      type: 'pointer',
+      id: 'finger',
+      parameters: { pointerType: 'touch' },
+      actions: [
+        {
+          type: 'pointerMove',
+          duration: 0,
+          x: Math.round(rect.width * 0.5),
+          y: Math.round(rect.height * startFraction),
+        },
+        { type: 'pointerDown', button: 0 },
+        { type: 'pause', duration: 100 },
+        {
+          type: 'pointerMove',
+          duration: 600,
+          x: Math.round(rect.width * 0.5),
+          y: Math.round(rect.height * endFraction),
+        },
+        { type: 'pointerUp', button: 0 },
+      ],
+    }],
+  });
+}
+
 async function findByResourceId(sessionId, resourceId) {
   try {
     const element = await request(sessionId, 'POST', '/element', {
@@ -86,11 +133,56 @@ async function waitUntil(predicate, { timeout, interval, timeoutMsg }) {
   throw new Error(timeoutMsg);
 }
 
+async function startRecording(sessionId) {
+  await request(sessionId, 'POST', '/session/:sessionId/appium/start_recording_screen', {
+    options: {
+      videoType: 'mpeg4',
+      videoQuality: 'medium',
+    },
+  });
+}
+
+async function stopRecording(sessionId) {
+  const result = await request(sessionId, 'POST', '/session/:sessionId/appium/stop_recording_screen', {
+    options: {},
+  });
+  return Buffer.from(result, 'base64');
+}
+
+function generateReport(testName, { status, duration }) {
+  const fs = require('fs');
+  const path = require('path');
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const reportDir = path.join(__dirname, 'reports', `${testName}-${timestamp}`);
+  fs.mkdirSync(reportDir, { recursive: true });
+
+  const report = {
+    testName,
+    status,
+    duration,
+    timestamp: new Date().toISOString(),
+  };
+
+  fs.writeFileSync(
+    path.join(reportDir, 'report.json'),
+    JSON.stringify(report, null, 2)
+  );
+
+  console.log(`Report generated: ${path.join(reportDir, 'report.json')}`);
+  return reportDir;
+}
+
 module.exports = {
   click,
   createSession,
   deleteSession,
+  findByClassName,
   findByResourceId,
   findByText,
+  generateReport,
+  startRecording,
+  stopRecording,
+  swipeUp,
   waitUntil,
 };

@@ -33,6 +33,7 @@ dependencies {
     implementation(libs.compose.uiToolingPreview)
     implementation(libs.kotlinx.coroutinesAndroid)
     debugImplementation(libs.compose.uiTooling)
+    testImplementation(libs.kotlin.testJunit)
 }
 
 android {

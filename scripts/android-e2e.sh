@@ -9,12 +9,22 @@ APPIUM_PORT="${APPIUM_PORT:-4723}"
 SERVICE="com.storyteller_f.divedeep/com.storyteller_f.divedeep.DiveDeepAccessibilityService"
 APP_PACKAGE="com.storyteller_f.divedeep"
 FIXTURE_PACKAGE="com.storyteller_f.divedeep.fixture"
-LLMD_PACKAGE="com.storytellerf.llmd"
+LLMD_VARIANT="${LLMD_VARIANT:-release}"
 LLMD_SERVICE_CLASS="com.storytellerf.llmd.LlmdIpcService"
 LLMD_APK="${LLMD_APK:-}"
 LLMD_REPO="${LLMD_REPO:-}"
 STARTED_APPIUM_PID=""
 USING_EXISTING_APPIUM=false
+
+case "$LLMD_VARIANT" in
+  release) LLMD_PACKAGE="com.storytellerf.llmd" ;;
+  daily) LLMD_PACKAGE="com.storytellerf.llmd.daily" ;;
+  debug) LLMD_PACKAGE="com.storytellerf.llmd.debug" ;;
+  *)
+    echo "LLMD_VARIANT must be release, daily, or debug: $LLMD_VARIANT" >&2
+    exit 2
+    ;;
+esac
 
 adb_cmd() {
   if [[ -n "$DEVICE" ]]; then
@@ -76,7 +86,7 @@ is_llmd_service_available() {
 
 newest_apk() {
   local output_dir="$1"
-  find "$output_dir" -type f -name '*.apk' -printf '%T@ %p\n' 2>/dev/null |
+  find "$output_dir" -type f -path "*/debug/*.apk" -printf '%T@ %p\n' 2>/dev/null |
     sort -n |
     tail -n 1 |
     cut -d' ' -f2-
@@ -109,6 +119,12 @@ build_and_install_llmd() {
 
   if [[ ! -f "$app_dir/package.json" ]]; then
     echo "LLMD_REPO does not point to an llmd checkout with app/package.json: $repo" >&2
+    exit 1
+  fi
+
+  if [[ "$LLMD_VARIANT" != "debug" ]]; then
+    echo "Automatic llmd source builds support LLMD_VARIANT=debug only." >&2
+    echo "Install llmd $LLMD_VARIANT first or provide its APK with LLMD_APK." >&2
     exit 1
   fi
 
@@ -196,8 +212,13 @@ set_dive_deep_enabled() {
 }
 
 authorize_llmd_ipc() {
-  APPIUM_HOST="$APPIUM_HOST" APPIUM_PORT="$APPIUM_PORT" DEVICE="$DEVICE" \
+  APPIUM_HOST="$APPIUM_HOST" APPIUM_PORT="$APPIUM_PORT" DEVICE="$DEVICE" LLMD_VARIANT="$LLMD_VARIANT" \
     node test/e2e/android-authorize-llmd.js
+}
+
+configure_llmd_variant() {
+  APPIUM_HOST="$APPIUM_HOST" APPIUM_PORT="$APPIUM_PORT" DEVICE="$DEVICE" LLMD_VARIANT="$LLMD_VARIANT" \
+    node test/e2e/android-configure-llmd.js
 }
 
 fixture_node_bounds() {
@@ -336,6 +357,7 @@ adb_cmd shell am force-stop "$APP_PACKAGE"
 adb_cmd shell am force-stop "$FIXTURE_PACKAGE"
 start_appium
 authorize_llmd_ipc
+configure_llmd_variant
 set_dive_deep_enabled true
 adb_cmd logcat -c
 write_setting enabled_accessibility_services "$(append_service "$OLD_SERVICES")"
