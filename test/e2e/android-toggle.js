@@ -3,6 +3,9 @@ const {
   createSession,
   deleteSession,
   findByText,
+  generateReport,
+  startRecording,
+  stopRecording,
   waitUntil,
 } = require('./android-appium');
 
@@ -20,15 +23,22 @@ function desiredEnabled() {
 
 async function main() {
   const enabled = desiredEnabled();
-  const sessionId = await createSession({
-    'appium:appPackage': APP_PACKAGE,
-    'appium:appActivity': APP_ACTIVITY,
-    'appium:noReset': true,
-    'appium:forceAppLaunch': true,
-    'appium:newCommandTimeout': 120,
-  });
+  const testName = 'android-toggle';
+  const startTime = Date.now();
+  let sessionId;
 
   try {
+    sessionId = await createSession({
+      'appium:appPackage': APP_PACKAGE,
+      'appium:appActivity': APP_ACTIVITY,
+      'appium:noReset': true,
+      'appium:forceAppLaunch': true,
+      'appium:newCommandTimeout': 120,
+    });
+
+    // Start recording
+    await startRecording(sessionId);
+
     const targetText = enabled ? BUTTON_ENABLE : BUTTON_DISABLE;
     const oppositeText = enabled ? BUTTON_DISABLE : BUTTON_ENABLE;
     await waitUntil(
@@ -52,8 +62,33 @@ async function main() {
         },
       );
     }
+
+    // Stop recording and generate report
+    const videoData = await stopRecording(sessionId);
+    const duration = Date.now() - startTime;
+    const reportDir = generateReport(testName, {
+      status: 'passed',
+      duration,
+    });
+
+    // Save video file
+    const fs = require('fs');
+    const path = require('path');
+    fs.writeFileSync(path.join(reportDir, 'recording.mp4'), videoData);
+
+    console.log(`Test passed. Report generated at: ${reportDir}`);
+  } catch (error) {
+    // Generate failed report
+    const duration = Date.now() - startTime;
+    generateReport(testName, {
+      status: 'failed',
+      duration,
+    });
+    throw error;
   } finally {
-    await deleteSession(sessionId);
+    if (sessionId) {
+      await deleteSession(sessionId);
+    }
   }
 }
 

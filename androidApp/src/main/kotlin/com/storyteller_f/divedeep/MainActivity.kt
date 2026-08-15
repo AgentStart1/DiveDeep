@@ -75,16 +75,21 @@ class MainActivity : ComponentActivity() {
                 onSaveConfig = { config ->
                     lifecycleScope.launch {
                         if (config.backend == TranslationBackend.LocalLlmdIpc && !isLlmdAuthorized(config)) {
-                            llmdAuthorizationMessage = "请先在 llmd 中授权 DiveDeep"
-                            openLlmdAuthorization()
+                            llmdAuthorizationMessage =
+                                "请先在 llmd ${config.llmdTarget.displayName} 中授权 DiveDeep"
+                            openLlmdAuthorization(config.llmdTarget)
                             return@launch
                         }
-                        llmdAuthorizationMessage = ""
                         DiveDeepState.setTranslationConfig(this@MainActivity, config)
+                        llmdAuthorizationMessage = if (config.backend == TranslationBackend.LocalLlmdIpc) {
+                            "已保存 llmd ${config.llmdTarget.displayName} 配置"
+                        } else {
+                            ""
+                        }
                     }
                 },
-                onAuthorizeLlmd = {
-                    openLlmdAuthorization()
+                onAuthorizeLlmd = { target ->
+                    openLlmdAuthorization(target)
                 },
                 onPackageBlockedChange = { packageName, blocked ->
                     lifecycleScope.launch {
@@ -112,14 +117,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun openLlmdAuthorization() {
+    private fun openLlmdAuthorization(target: LlmdTarget) {
         val intent = Intent(LlmdIpcTranslationService.ACTION_AUTHORIZE_CALLER)
-            .setPackage(LlmdIpcTranslationService.LLMD_PACKAGE)
+            .setPackage(target.packageName)
             .putExtra(LlmdIpcTranslationService.EXTRA_CALLER_PACKAGE, packageName)
         try {
             startActivity(intent)
         } catch (_: ActivityNotFoundException) {
-            llmdAuthorizationMessage = "未安装支持授权的 llmd"
+            llmdAuthorizationMessage = "未安装支持授权的 llmd ${target.displayName}"
         }
     }
 
@@ -160,15 +165,15 @@ private fun DiveDeepSettingsScreen(
     onToggle: () -> Unit,
     onOpenAccessibilitySettings: () -> Unit,
     onSaveConfig: (TranslationConfig) -> Unit,
-    onAuthorizeLlmd: () -> Unit,
+    onAuthorizeLlmd: (LlmdTarget) -> Unit,
     onPackageBlockedChange: (String, Boolean) -> Unit,
 ) {
     var backend by remember(config) { mutableStateOf(config.backend) }
+    var llmdTarget by remember(config) { mutableStateOf(config.llmdTarget) }
     var apiBaseUrl by remember(config) { mutableStateOf(config.apiBaseUrl) }
     var model by remember(config) { mutableStateOf(config.model) }
     var apiKey by remember(config) { mutableStateOf(config.apiKey) }
     var useMockTranslation by remember(config) { mutableStateOf(config.useMockTranslation) }
-    val httpEnabled = backend == TranslationBackend.OpenAiHttp
 
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
@@ -180,11 +185,7 @@ private fun DiveDeepSettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 item {
-                    HeaderSection(enabled)
-                }
-
-                item {
-                    ActionSection(
+                    OverviewSection(
                         enabled = enabled,
                         onToggle = onToggle,
                         onOpenAccessibilitySettings = onOpenAccessibilitySettings,
@@ -195,8 +196,10 @@ private fun DiveDeepSettingsScreen(
                     BackendSection(
                         backend = backend,
                         onBackendChange = { backend = it },
+                        llmdTarget = llmdTarget,
+                        onLlmdTargetChange = { llmdTarget = it },
                         authorizationMessage = llmdAuthorizationMessage,
-                        onAuthorizeLlmd = onAuthorizeLlmd,
+                        onAuthorizeLlmd = { onAuthorizeLlmd(llmdTarget) },
                     )
                 }
 
@@ -204,7 +207,7 @@ private fun DiveDeepSettingsScreen(
                     TranslationTextField(
                         value = apiBaseUrl,
                         onValueChange = { apiBaseUrl = it },
-                        enabled = httpEnabled,
+                        enabled = backend == TranslationBackend.OpenAiHttp,
                         label = "API Base URL",
                     )
                 }
@@ -221,7 +224,7 @@ private fun DiveDeepSettingsScreen(
                     TranslationTextField(
                         value = apiKey,
                         onValueChange = { apiKey = it },
-                        enabled = httpEnabled,
+                        enabled = backend == TranslationBackend.OpenAiHttp,
                         label = "API Key",
                         visualTransformation = PasswordVisualTransformation(),
                     )
@@ -237,6 +240,7 @@ private fun DiveDeepSettingsScreen(
                 item {
                     SaveTranslationConfigButton(
                         backend = backend,
+                        llmdTarget = llmdTarget,
                         apiBaseUrl = apiBaseUrl,
                         model = model,
                         apiKey = apiKey,
@@ -260,6 +264,22 @@ private fun DiveDeepSettingsScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun OverviewSection(
+    enabled: Boolean,
+    onToggle: () -> Unit,
+    onOpenAccessibilitySettings: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        HeaderSection(enabled)
+        ActionSection(
+            enabled = enabled,
+            onToggle = onToggle,
+            onOpenAccessibilitySettings = onOpenAccessibilitySettings,
+        )
     }
 }
 
@@ -303,6 +323,8 @@ private fun ActionSection(
 private fun BackendSection(
     backend: TranslationBackend,
     onBackendChange: (TranslationBackend) -> Unit,
+    llmdTarget: LlmdTarget,
+    onLlmdTargetChange: (LlmdTarget) -> Unit,
     authorizationMessage: String,
     onAuthorizeLlmd: () -> Unit,
 ) {
@@ -310,14 +332,19 @@ private fun BackendSection(
     BackendOption(
         selected = backend == TranslationBackend.LocalLlmdIpc,
         text = "本机 llmd IPC",
-        onClick = {
-            onBackendChange(TranslationBackend.LocalLlmdIpc)
-            onAuthorizeLlmd()
-        },
+        onClick = { onBackendChange(TranslationBackend.LocalLlmdIpc) },
     )
     if (backend == TranslationBackend.LocalLlmdIpc) {
+        Text("llmd 版本", style = MaterialTheme.typography.titleMedium)
+        LlmdTarget.entries.forEach { target ->
+            BackendOption(
+                selected = llmdTarget == target,
+                text = target.displayName,
+                onClick = { onLlmdTargetChange(target) },
+            )
+        }
         Button(onClick = onAuthorizeLlmd) {
-            Text("授权 llmd")
+            Text("授权 llmd ${llmdTarget.displayName}")
         }
         if (authorizationMessage.isNotBlank()) {
             Text(authorizationMessage, style = MaterialTheme.typography.bodySmall)
@@ -366,6 +393,7 @@ private fun MockTranslationToggle(
 @Composable
 private fun SaveTranslationConfigButton(
     backend: TranslationBackend,
+    llmdTarget: LlmdTarget,
     apiBaseUrl: String,
     model: String,
     apiKey: String,
@@ -377,6 +405,7 @@ private fun SaveTranslationConfigButton(
             onSaveConfig(
                 TranslationConfig(
                     backend = backend,
+                    llmdTarget = llmdTarget,
                     apiBaseUrl = apiBaseUrl.trim(),
                     model = model.trim(),
                     apiKey = apiKey.trim(),

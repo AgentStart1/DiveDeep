@@ -20,6 +20,7 @@ For JavaScript end-to-end test helpers, at least syntax-check the scripts:
 ```bash
 node --check test/e2e/android-appium.js
 node --check test/e2e/android-authorize-llmd.js
+node --check test/e2e/android-configure-llmd.js
 node --check test/e2e/android-toggle.js
 ```
 
@@ -32,18 +33,21 @@ Android end-to-end tests use a real device or emulator and must be serialized wi
   --test-name "divedeep-android-e2e" \
   --max-timeout-seconds 3600 \
   --wait-timeout-seconds 3600 \
-  -- env DEVICE="$DEVICE" ./scripts/android-e2e.sh
+  -- env DEVICE="$DEVICE" LLMD_VARIANT="${LLMD_VARIANT:-release}" ./scripts/android-e2e.sh
 ```
 
 The end-to-end test must use the real llmd IPC service, not a mock. Before running it, make sure:
 
 - An Android device or emulator is connected, selected with `DEVICE`, and unlocked.
 - Appium and the `uiautomator2` driver are installed through the repository npm dependencies.
-- llmd package `com.storytellerf.llmd` is installed and exposes `com.storytellerf.llmd.action.BIND_IPC`.
+- The selected llmd package is installed and exposes `com.storytellerf.llmd.action.BIND_IPC`: Release
+  `com.storytellerf.llmd`, Daily `com.storytellerf.llmd.daily`, or Debug `com.storytellerf.llmd.debug`.
 - llmd has the test model in its app-private files, currently `files/models/gemma-4-E2B-it.litertlm`.
-- DiveDeep package `com.storyteller_f.divedeep` is authorized in llmd. The script opens the llmd authorization page and confirms access through Appium.
+- DiveDeep package `com.storyteller_f.divedeep` is authorized in the selected llmd variant. The script opens that variant's
+  authorization page, saves the matching DiveDeep target, and confirms access through Appium.
 
-If llmd is missing, `scripts/android-e2e.sh` can install it from `LLMD_APK`, or build it from `LLMD_REPO` or a sibling `../llmd` checkout. Build llmd Android APKs through the Tauri CLI from the llmd app directory:
+If llmd is missing, `scripts/android-e2e.sh` can install it from `LLMD_APK`. For `LLMD_VARIANT=debug`, it can also build llmd from
+`LLMD_REPO` or a sibling `../llmd` checkout. Build llmd Android APKs through the Tauri CLI from the llmd app directory:
 
 ```bash
 cd /home/mint-dev/Forks/llmd/app
