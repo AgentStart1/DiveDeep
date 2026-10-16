@@ -4,7 +4,11 @@ plugins {
 
 android {
     namespace = "com.storyteller_f.divedeep.fixture"
-    compileSdk = libs.versions.android.compileSdk.get().toInt()
+    compileSdk {
+            version = release(libs.versions.android.compileSdk.get().toInt()) {
+                minorApiLevel = libs.versions.android.compileSdkMinor.get().toInt()
+            }
+        }
 
     defaultConfig {
         applicationId = "com.storyteller_f.divedeep.fixture"
