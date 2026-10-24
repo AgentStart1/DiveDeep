@@ -8,7 +8,7 @@ API 37 with minor API level 1 because the updated Compose Android dependencies
 require it. Major and minor compile SDK versions are configured in
 `gradle/libs.versions.toml`; the target and minimum SDK versions are independent.
 
-The build uses AGP 9.4.1 with Gradle 9.8.1 and compile SDK 37.1. Keep these
+The build uses AGP 9.4.1 with Gradle 9.8.2 and compile SDK 37.1. Keep these
 versions compatible rather than suppressing unsupported compile SDK warnings.
 
 ## Validation
