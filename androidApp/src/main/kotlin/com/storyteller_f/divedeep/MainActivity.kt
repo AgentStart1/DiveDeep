@@ -19,11 +19,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.foundation.text.input.TextObfuscationMode
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedSecureTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -34,8 +37,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
@@ -156,7 +157,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun DiveDeepSettingsScreen(
+internal fun DiveDeepSettingsScreen(
     enabled: Boolean,
     config: TranslationConfig,
     blockedPackages: Set<String>,
@@ -172,7 +173,7 @@ private fun DiveDeepSettingsScreen(
     var llmdTarget by remember(config) { mutableStateOf(config.llmdTarget) }
     var apiBaseUrl by remember(config) { mutableStateOf(config.apiBaseUrl) }
     var model by remember(config) { mutableStateOf(config.model) }
-    var apiKey by remember(config) { mutableStateOf(config.apiKey) }
+    val apiKey = remember(config) { TextFieldState(config.apiKey) }
     var useMockTranslation by remember(config) { mutableStateOf(config.useMockTranslation) }
 
     MaterialTheme {
@@ -221,12 +222,12 @@ private fun DiveDeepSettingsScreen(
                 }
 
                 item {
-                    TranslationTextField(
-                        value = apiKey,
-                        onValueChange = { apiKey = it },
+                    OutlinedSecureTextField(
+                        state = apiKey,
                         enabled = backend == TranslationBackend.OpenAiHttp,
-                        label = "API Key",
-                        visualTransformation = PasswordVisualTransformation(),
+                        label = { Text("API Key") },
+                        textObfuscationMode = TextObfuscationMode.Hidden,
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
 
@@ -243,7 +244,7 @@ private fun DiveDeepSettingsScreen(
                         llmdTarget = llmdTarget,
                         apiBaseUrl = apiBaseUrl,
                         model = model,
-                        apiKey = apiKey,
+                        apiKey = apiKey.text.toString(),
                         useMockTranslation = useMockTranslation,
                         onSaveConfig = onSaveConfig,
                     )
@@ -363,7 +364,6 @@ private fun TranslationTextField(
     onValueChange: (String) -> Unit,
     label: String,
     enabled: Boolean = true,
-    visualTransformation: PasswordVisualTransformation? = null,
 ) {
     OutlinedTextField(
         value = value,
@@ -371,7 +371,6 @@ private fun TranslationTextField(
         enabled = enabled,
         label = { Text(label) },
         singleLine = true,
-        visualTransformation = visualTransformation ?: VisualTransformation.None,
         modifier = Modifier.fillMaxWidth(),
     )
 }
@@ -459,7 +458,7 @@ private fun AppFilterRow(
     }
 }
 
-private data class AppEntry(
+internal data class AppEntry(
     val label: String,
     val packageName: String,
 )

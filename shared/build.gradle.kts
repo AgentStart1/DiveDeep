@@ -22,7 +22,7 @@ kotlin {
     
     jvm()
     
-    androidLibrary {
+    android {
        namespace = "com.storyteller_f.divedeep.shared"
        compileSdk {
            version = release(libs.versions.android.compileSdk.get().toInt()) {
