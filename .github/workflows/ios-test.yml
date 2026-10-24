@@ -1,0 +1,45 @@
+name: iOS Test
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'shared/**'
+      - '**/*.gradle.kts'
+      - 'gradle/**'
+      - 'gradle.properties'
+      - 'gradlew'
+      - 'settings.gradle.kts'
+      - '.github/workflows/ios-test.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  simulator-test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: set up JDK 17
+        uses: actions/setup-java@v6
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Run shared tests on the iOS simulator
+        run: ./gradlew :shared:iosSimulatorArm64Test --warning-mode all --no-daemon
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-simulator-test-results
+          path: |
+            shared/build/reports/tests/iosSimulatorArm64Test/
+            shared/build/test-results/iosSimulatorArm64Test/
+          if-no-files-found: warn
