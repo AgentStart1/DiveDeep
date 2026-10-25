@@ -14,6 +14,7 @@ import androidx.room.RoomDatabaseConstructor
 import androidx.room.RoomDatabase.Builder
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.IO
 
 @Entity(tableName = "translation_cache")
 data class TranslationCacheEntry(
