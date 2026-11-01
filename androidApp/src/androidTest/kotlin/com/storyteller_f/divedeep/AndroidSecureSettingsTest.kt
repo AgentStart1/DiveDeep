@@ -79,14 +79,14 @@ class AndroidSecureSettingsTest {
             },
         )
         settings.enableService()
-        assertEquals(listOf(FOREIGN_SERVICE, OWN_SERVICE), values[SERVICES]?.split(':'))
+        assertEquals(listOf(FOREIGN_SERVICE, ownService), values[SERVICES]?.split(':'))
         assertEquals("1", values[Settings.Secure.ACCESSIBILITY_ENABLED])
     }
 
     @Test
     fun failedReadbackCannotConfirmDeletion() {
         val writes = mutableListOf<String>()
-        val responses = ArrayDeque(listOf(cursor().apply { addRow(arrayOf(OWN_SERVICE)) }))
+        val responses = ArrayDeque(listOf(cursor().apply { addRow(arrayOf(ownService)) }))
         val settings = settings(AndroidSecureSettings { responses.removeFirstOrNull() }, writes)
         assertThrows(IllegalStateException::class.java) { settings.disableService() }
         assertEquals(listOf("settings delete secure $SERVICES"), writes)
@@ -102,6 +102,8 @@ class AndroidSecureSettingsTest {
     private companion object {
         const val SERVICES = Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
         const val FOREIGN_SERVICE = "example.accessibility/.ReaderService"
-        const val OWN_SERVICE = "com.storyteller_f.divedeep/com.storyteller_f.divedeep.DiveDeepAccessibilityService"
+        val ownService get() = android.content.ComponentName(
+            InstrumentationRegistry.getInstrumentation().targetContext, DiveDeepAccessibilityService::class.java,
+        ).flattenToString()
     }
 }

@@ -12,6 +12,10 @@ class AndroidAccessibilityCaptureDriver(
 ) : ContentCaptureDriver {
     override fun captureVisibleText(): List<ScreenTextNode> {
         val root = rootProvider() ?: return emptyList()
+        return captureVisibleText(root)
+    }
+
+    internal fun captureVisibleText(root: AccessibilityNodeInfo): List<ScreenTextNode> {
         val nodes = mutableListOf<ScreenTextNode>()
         traverse(root, depth = 0, nodes = nodes)
         return nodes

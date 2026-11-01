@@ -67,6 +67,7 @@ class SettingsApiKeyTest {
         var saved: TranslationConfig? = null
         val config = mutableStateOf(TranslationConfig(backend = TranslationBackend.OpenAiHttp))
         compose.setContent { Settings(config.value) { saved = it } }
+        compose.onNodeWithText("翻译服务").performClick()
         keyField().performScrollTo().performTextReplacement("unsaved")
 
         compose.runOnIdle { config.value = config.value.copy(apiKey = "loaded-key") }
@@ -90,6 +91,7 @@ class SettingsApiKeyTest {
 
     private fun showSettings(config: TranslationConfig, onSave: (TranslationConfig) -> Unit) {
         compose.setContent { Settings(config, onSave) }
+        compose.onNodeWithText("翻译服务").performClick()
     }
 }
 

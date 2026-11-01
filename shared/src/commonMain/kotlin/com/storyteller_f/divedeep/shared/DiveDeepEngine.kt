@@ -7,9 +7,7 @@ class DiveDeepEngine(
     private val targetLanguageProvider: () -> String,
 ) {
     suspend fun refresh(shouldContinue: () -> Boolean = { true }): TranslationFrame {
-        val nodes = captureDriver.captureVisibleText()
-            .filter { it.visible && it.text.isNotBlank() && !it.bounds.isEmpty }
-            .distinctBy { it.id }
+        val nodes = captureDriver.captureVisibleText().translationNodes()
 
         val targetLanguage = targetLanguageProvider()
         val translated = mutableListOf<TranslationItem>()
@@ -38,3 +36,6 @@ class DiveDeepEngine(
         overlayRenderer.clear()
     }
 }
+
+internal fun List<ScreenTextNode>.translationNodes(): List<ScreenTextNode> =
+    filter { it.visible && it.text.isNotBlank() && !it.bounds.isEmpty }.distinctBy { it.id }

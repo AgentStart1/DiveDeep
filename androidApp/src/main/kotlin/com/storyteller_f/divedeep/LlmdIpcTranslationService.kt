@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.os.IBinder
 import android.os.RemoteException
+import android.util.Log
 import com.storyteller_f.divedeep.shared.MockTranslationService
 import com.storyteller_f.divedeep.shared.TranslationItem
 import com.storyteller_f.divedeep.shared.TranslationRequest
@@ -16,12 +17,14 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withContext
 
 class LlmdIpcTranslationService(
     context: Context,
@@ -35,6 +38,7 @@ class LlmdIpcTranslationService(
     private var bound = false
     private var boundTarget: LlmdTarget? = null
     private var pendingBinding: CompletableDeferred<ILlmdService>? = null
+    private val pendingResponses = mutableSetOf<CompletableDeferred<String>>()
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             bindingScope.launch {
@@ -85,46 +89,68 @@ class LlmdIpcTranslationService(
 
     suspend fun health(): String {
         val target = configProvider().llmdTarget
-        return requestIpc(target) { callback ->
-            requireService(target).healthAsync(callback)
+        return requestIpc(target) { remote, callback ->
+            remote.healthAsync(callback)
         }
     }
 
     private suspend fun requestChatCompletion(target: LlmdTarget, requestJson: String): String =
-        requestIpc(target) { callback ->
-            requireService(target).chatCompletionAsync(requestJson, callback)
+        requestIpc(target) { remote, callback ->
+            remote.chatCompletionAsync(requestJson, callback)
         }
 
     private suspend fun requestIpc(
         target: LlmdTarget,
-        call: suspend (ILlmdChatCallback) -> Unit,
-    ): String =
-        try {
-            requestAsync(call)
+        call: (ILlmdService, ILlmdChatCallback) -> Unit,
+    ): String {
+        val remote = requireService(target)
+        return try {
+            requestAsync(target, remote) { callback -> call(remote, callback) }
         } catch (error: RemoteException) {
-            clearBindingIfCurrentTarget(target, error)
+            clearBindingIfCurrentService(remote, error)
             throw TranslationException("Local llmd IPC request failed: ${error.message.orEmpty()}", error)
         }
+    }
 
-    private suspend fun requestAsync(call: suspend (ILlmdChatCallback) -> Unit): String {
+    private suspend fun requestAsync(
+        target: LlmdTarget,
+        remote: ILlmdService,
+        call: (ILlmdChatCallback) -> Unit,
+    ): String {
         val response = CompletableDeferred<String>()
+        registerResponse(target, remote, response)
         val callback = object : ILlmdChatCallback.Stub() {
             override fun onComplete(responseJson: String) {
                 response.complete(responseJson)
             }
         }
-        try {
-            call(callback)
-        } catch (error: RemoteException) {
-            response.completeExceptionally(error)
-        }
-
         return try {
+            call(callback)
             withTimeout(REQUEST_TIMEOUT_MILLIS) { response.await() }
                 .takeIf(String::isNotEmpty)
                 ?: throw TranslationException("Local llmd IPC returned an empty response")
         } catch (error: TimeoutCancellationException) {
             throw TranslationException("Timed out waiting for local llmd IPC response", error)
+        } finally {
+            // A cancelled caller must not leave a live callback in the binding's pending set.
+            response.cancel()
+            withContext(NonCancellable) {
+                bindingMutex.withLock { pendingResponses.remove(response) }
+            }
+        }
+    }
+
+    private suspend fun registerResponse(
+        target: LlmdTarget,
+        remote: ILlmdService,
+        response: CompletableDeferred<String>,
+    ) {
+        bindingMutex.withLock {
+            if (service !== remote || boundTarget != target) {
+                throw TranslationException("Local llmd IPC connection changed before the request started")
+            }
+            pendingResponses += response
+            Log.d(TAG, "IPC request started pending=${pendingResponses.size}")
         }
     }
 
@@ -183,9 +209,9 @@ class LlmdIpcTranslationService(
         }
     }
 
-    private suspend fun clearBindingIfCurrentTarget(target: LlmdTarget, cause: Throwable) {
+    private suspend fun clearBindingIfCurrentService(remote: ILlmdService, cause: Throwable) {
         bindingMutex.withLock {
-            if (target == boundTarget) {
+            if (service === remote) {
                 clearBindingLocked(cause)
             }
         }
@@ -210,6 +236,9 @@ class LlmdIpcTranslationService(
 
     private fun clearBindingLocked(cause: Throwable) {
         service = null
+        if (pendingResponses.isNotEmpty()) Log.w(TAG, "IPC binding closed pending=${pendingResponses.size}")
+        pendingResponses.forEach { it.completeExceptionally(cause) }
+        pendingResponses.clear()
         pendingBinding?.completeExceptionally(cause)
         pendingBinding = null
         if (bound) {
@@ -220,6 +249,7 @@ class LlmdIpcTranslationService(
     }
 
     companion object {
+        private const val TAG = "DiveDeepIpc"
         const val ACTION_AUTHORIZE_CALLER = "com.storytellerf.llmd.action.AUTHORIZE_CALLER"
         const val ACTION_BIND_IPC = "com.storytellerf.llmd.action.BIND_IPC"
         const val EXTRA_CALLER_PACKAGE = "caller_package"
