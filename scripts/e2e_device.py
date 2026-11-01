@@ -10,9 +10,10 @@ import shlex
 
 from e2e_runs import write_bytes, write_json
 
-APP = 'com.storyteller_f.divedeep'
-FIXTURE = APP + '.fixture'
-SERVICE = APP + '/' + APP + '.DiveDeepAccessibilityService'
+NAMESPACE = 'com.storyteller_f.divedeep'
+APP = NAMESPACE + '.debug'
+FIXTURE = NAMESPACE + '.fixture'
+SERVICE = APP + '/' + NAMESPACE + '.DiveDeepAccessibilityService'
 PREFERENCES = 'files/datastore/dive_deep_state.preferences_pb'
 MARKER = '/data/local/tmp/divedeep-e2e.run'
 SERVICES = 'enabled_accessibility_services'
@@ -75,6 +76,12 @@ class Phase(Enum):
 
 
 class Device:
+    app = APP
+
+    @property
+    def service(self):
+        return self.app + '/' + NAMESPACE + '.DiveDeepAccessibilityService'
+
     def __init__(self, commands, serial, adb='adb'):
         self.commands, self.serial, self.adb = commands, serial, adb
 
@@ -119,7 +126,7 @@ class Device:
         current = await self.read_setting(SERVICES)
         if isinstance(current, Absent):
             return
-        own = {SERVICE, APP + '/.DiveDeepAccessibilityService'}
+        own = {self.service, self.app + '/.DiveDeepAccessibilityService'}
         remaining = [item for item in current.value.split(':') if item and item not in own]
         if len(remaining) != len([item for item in current.value.split(':') if item]):
             await self.write_setting(SERVICES, Present(':'.join(remaining)) if remaining else Absent())
@@ -133,7 +140,7 @@ class Device:
         # Instrumentation runs in the target app's process. End that writer first;
         # an original accessibility service may rebind, so app quiescence is checked
         # separately after disabling that service.
-        await self.force_stop(APP)
+        await self.force_stop(self.app)
 
     async def stop_app(self, package):
         await self.force_stop(package)
@@ -173,16 +180,16 @@ class Device:
             raise DeviceError('Run marker remained after removal')
 
     async def copy_preferences(self, source, destination):
-        await self.shell(['run-as', APP, 'cp', source, destination], operation='copy-private-preferences')
+        await self.shell(['run-as', self.app, 'cp', source, destination], operation='copy-private-preferences')
 
     async def export_preferences(self):
-        output = await self.read(['run-as', APP, 'base64', PREFERENCES], operation='read-private-preferences', exec_out=True)
+        output = await self.read(['run-as', self.app, 'base64', PREFERENCES], operation='read-private-preferences', exec_out=True)
         encoded = b''.join(output.split())
         base64.b64decode(encoded, validate=True)
         return encoded
 
     async def remove_private(self, path):
-        await self.shell(['run-as', APP, 'rm', '-f', path], operation='remove-owned-private-file')
+        await self.shell(['run-as', self.app, 'rm', '-f', path], operation='remove-owned-private-file')
 
 
 class Transaction:
@@ -209,6 +216,7 @@ class Transaction:
         pref = snapshot.preferences
         data = {
             'schema': 1, 'run_id': self.run_id, 'serial': self.device.serial, 'phase': phase.value,
+            'application_id': self.device.app,
             'services': snapshot.services.value if isinstance(snapshot.services, Present) else None,
             'accessibility': snapshot.accessibility.value if isinstance(snapshot.accessibility, Present) else None,
             'preferences': {'kind': 'saved', 'checksum': pref.checksum} if isinstance(pref, Saved) else
@@ -223,14 +231,14 @@ class Transaction:
         # Finish all reads before publishing intent or making a device mutation.
         services = await self.device.read_setting(SERVICES)
         enabled = await self.device.read_setting(ENABLED)
-        installed = await self.device.installed(APP)
+        installed = await self.device.installed(self.device.app)
         self.snapshot = Snapshot(services, enabled)
         self.save(Phase.CLAIMING)
         await self.device.claim(self.run_id)
         self.save(Phase.PREPARING)
         await self.device.disable_service()
-        await self.device.stop_app(APP)
-        if installed and await self.device.probe(PREFERENCES, APP):
+        await self.device.stop_app(self.device.app)
+        if installed and await self.device.probe(PREFERENCES, self.device.app):
             await self.device.copy_preferences(PREFERENCES, self.backup)
             encoded = await self.device.export_preferences()
             write_bytes(self.directory / 'preferences.base64', encoded)
@@ -260,7 +268,7 @@ class Transaction:
         # Each confirmed step is a precondition for the next. Stop on the first failure.
         await self.device.stop_tests()
         await self.device.disable_service()
-        await self.device.stop_app(APP)
+        await self.device.stop_app(self.device.app)
         await self.device.stop_app(FIXTURE)
         self.save(Phase.RESTORING_PREFERENCES)
         preferences = self.snapshot.preferences
@@ -269,9 +277,9 @@ class Transaction:
             encoded = await self.device.export_preferences()
             if hashlib.sha256(base64.b64decode(encoded, validate=True)).hexdigest() != preferences.checksum:
                 raise DeviceError('Preference restoration verification failed')
-        elif isinstance(preferences, Absent) and await self.device.installed(APP):
+        elif isinstance(preferences, Absent) and await self.device.installed(self.device.app):
             await self.device.remove_private(PREFERENCES)
-            if await self.device.probe(PREFERENCES, APP):
+            if await self.device.probe(PREFERENCES, self.device.app):
                 raise DeviceError('Test-created preferences remained')
         self.save(Phase.RESTORING_SERVICES)
         await self.device.write_setting(SERVICES, self.snapshot.services)
@@ -284,7 +292,7 @@ class Transaction:
         await self.dispose(True)
 
     async def dispose(self, has_marker):
-        if await self.device.installed(APP):
+        if await self.device.installed(self.device.app):
             await self.device.remove_private(self.backup)
         if has_marker:
             await self.device.remove_marker(self.run_id)
@@ -303,6 +311,10 @@ class Transaction:
         data = json.loads(journal.read_text(encoding='utf-8'))
         if data['schema'] != 1 or data['serial'] != device.serial:
             raise DeviceError('Recovery journal does not match the selected device')
+        # Journals before variant isolation belong to the original unsuffixed Debug package.
+        application_id = data.get('application_id', NAMESPACE)
+        if application_id not in (APP, NAMESPACE):
+            raise DeviceError('Recovery journal has an unsupported application ID')
         transaction = cls(device, journal.parent, data['run_id'])
         pref = data['preferences']
         if pref['kind'] == 'saved' and re.fullmatch('[0-9a-f]{64}', pref['checksum']):
@@ -315,4 +327,5 @@ class Transaction:
             raise DeviceError('Invalid preference recovery state')
         transaction.snapshot = Snapshot(setting(SERVICES, data['services']), setting(ENABLED, data['accessibility']), preferences)
         transaction.phase = Phase(data['phase'])
+        device.app = application_id
         return transaction

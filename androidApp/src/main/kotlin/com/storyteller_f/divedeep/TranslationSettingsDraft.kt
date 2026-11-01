@@ -25,4 +25,3 @@ internal class TranslationSettingsDraft(config: TranslationConfig) {
         useMockTranslation = useMockTranslation,
     )
 }
-

@@ -1,5 +1,36 @@
 This is a Kotlin Multiplatform project targeting Android, iOS, Web, Desktop (JVM).
 
+### Android screen translation
+
+Debug and Alpha can be installed beside Release, using `.debug` and `.alpha`
+application ID suffixes. Their launcher icons carry **DEBUG** and **ALPHA**
+ribbons. Each variant has its own settings and data; older unsuffixed Debug
+installations do not automatically migrate to the new Debug package.
+
+The home screen provides the translation switch, accessibility setup, and a
+clearly labelled example of the translation display. Enable DiveDeep in Android's
+accessibility settings before using screen translation; the home switch alone
+does not grant accessibility access. You can also toggle translation through the
+Quick Settings tile.
+
+Open **翻译服务** to select local llmd IPC or an HTTP/HTTPS API, configure the
+model and connection, then tap **保存翻译配置**. Local llmd requires caller
+authorization in the selected llmd variant. API keys stay masked, and switching
+backends preserves the entered connection details. Unsaved edits remain available
+when moving between the home and configuration screens during the same session.
+
+Open **应用排除** to choose apps that should not be translated. Checked apps are
+excluded, and changes save automatically. **使用 Mock 翻译** is available under
+the translation service's development options for testing only.
+
+Tap a floating translation icon to open translation details. The sheet shows the
+translation first, with the source below it. Long content scrolls inside the
+sheet; **复制译文** copies the result and **关闭** returns to the page. The page
+keeps receiving touches outside the floating controls.
+If local llmd stops or becomes unavailable, the floating controls continue
+following visible text and can still be disabled; new translations require the
+provider to be ready again.
+
 * [/iosApp](./iosApp/iosApp) contains an iOS application. Even if you’re sharing your UI with Compose Multiplatform,
   you need this entry point for your iOS app. This is also where you should add SwiftUI code for your project.
 

@@ -2,6 +2,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.androidApplication)
+    alias(libs.plugins.easylauncher)
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
 }
@@ -78,6 +79,10 @@ android {
         }
     }
     buildTypes {
+        getByName("debug") {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
         getByName("release") {
             isMinifyEnabled = false
             signingConfigs.findByName("release")?.let { signingConfig = it }
@@ -88,6 +93,13 @@ android {
             versionNameSuffix = "-daily"
             matchingFallbacks += listOf("release")
         }
+        create("alpha") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".alpha"
+            versionNameSuffix = "-alpha"
+            signingConfig = signingConfig ?: signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release")
+        }
     }
     buildFeatures {
         aidl = true
@@ -95,5 +107,16 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+    }
+}
+
+easylauncher {
+    buildTypes {
+        register("debug") {
+            filters(customRibbon(label = "DEBUG", ribbonColor = "#C62828", labelColor = "#FFFFFF"))
+        }
+        register("alpha") {
+            filters(customRibbon(label = "ALPHA", ribbonColor = "#6A1B9A", labelColor = "#FFFFFF"))
+        }
     }
 }

@@ -15,6 +15,10 @@ from e2e_process import Commands, CommandError, RunCancelled
 from e2e_runs import RunStore, write_json
 
 ROOT = Path(__file__).resolve().parent.parent
+SUITES = {
+    'overlay': 'com.storyteller_f.divedeep.OverlayLlmdIntegrationTest',
+    'disconnect': 'com.storyteller_f.divedeep.OverlayLlmdDisconnectTest',
+}
 
 
 class Runner:
@@ -81,7 +85,7 @@ class Runner:
             ':androidApp:connectedDebugAndroidTest',
             '-Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true',
             '-Pandroid.testInstrumentationRunnerArguments.notAnnotation=org.junit.Ignore',
-            '-Pandroid.testInstrumentationRunnerArguments.class=com.storyteller_f.divedeep.OverlayLlmdIntegrationTest',
+            '-Pandroid.testInstrumentationRunnerArguments.class=' + SUITES[self.args.suite],
             '-Pandroid.testInstrumentationRunnerArguments.realLlmd=true',
             '-Pandroid.testInstrumentationRunnerArguments.hostRunId=' + transaction.run_id,
             '-Pandroid.testInstrumentationRunnerArguments.llmdVariant=' + self.args.llmd_variant,
@@ -93,7 +97,7 @@ class Runner:
             output = await self.device.shell(['logcat', '-d', '-t', '1000', '-s', 'DiveDeepOverlay', 'DiveDeepAccessibility'],
                                              operation='collect-diagnostics')
             (self.report / 'overlay.log').write_bytes(output.stdout)
-            await self.device.call(['pull', f'/sdcard/Android/data/{APP}/files/e2e/{run_id}',
+            await self.device.call(['pull', f'/sdcard/Android/data/{self.device.app}/files/e2e/{run_id}',
                                     str(self.report / 'device')], operation='collect-ui-artifacts')
         except Exception as error:
             (self.report / 'diagnostics-error.txt').write_text(type(error).__name__, encoding='utf-8')
@@ -162,6 +166,8 @@ def main():
     parser.add_argument('--llmd-variant', choices=['release', 'daily', 'debug'], default=os.environ.get('LLMD_VARIANT', 'release'))
     parser.add_argument('--llmd-apk', default=os.environ.get('LLMD_APK'))
     parser.add_argument('--llmd-repo', default=os.environ.get('LLMD_REPO'))
+    parser.add_argument('--suite', choices=SUITES, default='overlay',
+                        help='disconnect intentionally stops LLMD; reload its model after testing')
     parser.add_argument('--report-dir', default=os.environ.get('E2E_REPORT_DIR'))
     parser.add_argument('--state-dir', default=os.environ.get('E2E_STATE_DIR'), help='Private persistent recovery registry')
     parser.add_argument('--recover', nargs='?', const='pending',

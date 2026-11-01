@@ -11,12 +11,12 @@ from unittest.mock import patch
 import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / 'scripts'))
-from e2e_device import (APP, FIXTURE, PREFERENCES, SERVICES, ENABLED, Absent, Present, Device,
+from e2e_device import (APP, FIXTURE, SERVICE, NAMESPACE, PREFERENCES, SERVICES, ENABLED, Absent, Present, Device,
                         DeviceError, Phase, Transaction)
 from e2e_process import CommandError, Output
 
 FOREIGN = 'example.reader/.AccessibilityService'
-OWN = APP + '/.DiveDeepAccessibilityService'
+OWN = SERVICE
 
 
 class Fault(RuntimeError):
@@ -107,6 +107,42 @@ class TransactionTest(unittest.IsolatedAsyncioTestCase):
         directory = self.directory / uuid.uuid4().hex
         directory.mkdir()
         return Transaction(device, directory, uuid.uuid4().hex)
+
+    async def test_recovery_remembers_original_application_package(self):
+        device = ModelDevice()
+        transaction = self.transaction(device)
+        await transaction.prepare()
+        self.assertEqual(json.loads(transaction.journal.read_text())['application_id'], APP)
+        device.app = NAMESPACE
+        recovered = Transaction.recover(device, transaction.journal)
+        self.assertEqual(device.app, APP)
+        await recovered.restore()
+        self.assert_closed(device, recovered)
+
+    async def test_legacy_journal_keeps_the_unsuffixed_application(self):
+        device = ModelDevice()
+        transaction = self.transaction(device)
+        await transaction.prepare()
+        data = json.loads(transaction.journal.read_text())
+        del data['application_id']
+        transaction.journal.write_text(json.dumps(data))
+        before = list(device.events)
+        Transaction.recover(device, transaction.journal)
+        self.assertEqual(device.app, NAMESPACE)
+        self.assertEqual(device.service, NAMESPACE + '/' + NAMESPACE + '.DiveDeepAccessibilityService')
+        self.assertEqual(before, device.events)
+
+    async def test_foreign_application_in_journal_cannot_authorize_recovery(self):
+        device = ModelDevice()
+        transaction = self.transaction(device)
+        await transaction.prepare()
+        data = json.loads(transaction.journal.read_text())
+        data['application_id'] = 'example.foreign'
+        transaction.journal.write_text(json.dumps(data))
+        before = list(device.events)
+        with self.assertRaisesRegex(DeviceError, 'application ID'):
+            Transaction.recover(device, transaction.journal)
+        self.assertEqual(before, device.events)
 
     def assert_closed(self, device, transaction):
         self.assertEqual(device.settings, device.original_settings)
@@ -241,6 +277,16 @@ class QueueCommands:
 
 
 class DeviceBoundaryTest(unittest.IsolatedAsyncioTestCase):
+    async def test_debug_service_removal_preserves_the_unsuffixed_service(self):
+        legacy = NAMESPACE + '/.DiveDeepAccessibilityService'
+        remaining = legacy + ':' + FOREIGN
+        commands = QueueCommands([
+            Output(0, (remaining + ':' + SERVICE).encode(), b''),
+            Output(0, b'', b''), Output(0, remaining.encode(), b''),
+        ])
+        await Device(commands, 'synthetic-device').disable_service()
+        self.assertIn('settings put secure ' + SERVICES + ' ' + remaining, commands.calls[1][-1])
+
     async def test_failed_or_invalid_reads_are_never_empty_service_lists(self):
         for output in (CommandError('disconnected'), Output(0, b'', b'permission denied'),
                        Output(0, b'error response', b'')):
