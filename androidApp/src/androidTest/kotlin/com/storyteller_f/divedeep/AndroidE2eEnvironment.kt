@@ -3,6 +3,7 @@ package com.storyteller_f.divedeep
 import android.app.UiAutomation
 import android.content.ComponentName
 import android.content.Intent
+import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.BySelector
@@ -20,9 +21,10 @@ import org.junit.runner.Description
 import org.junit.runners.model.Statement
 
 /** Owns a case's temporary baseline. Only the host restores the pre-run device/app snapshot. */
-internal class AndroidE2eEnvironment : TestRule {
+internal class AndroidE2eEnvironment(private val scrollableFixture: Boolean = false) : TestRule {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = instrumentation.targetContext
+    val appPackage get() = context.packageName
     private val arguments = InstrumentationRegistry.getArguments()
     private val settings = AndroidE2eSettings()
     private val runId get() = arguments.getString("hostRunId").orEmpty()
@@ -64,6 +66,7 @@ internal class AndroidE2eEnvironment : TestRule {
                 // Restore only the agreed per-case baseline, never the original host snapshot.
                 settings.disableService()
                 settings.awaitServiceStopped()
+                dismissSystemPanels()
                 DiveDeepState.setEnabled(context, false)
                 settings.stopFixture()
             }
@@ -79,8 +82,15 @@ internal class AndroidE2eEnvironment : TestRule {
         val target = LlmdTarget.fromPreference(variant)
         settings.disableService()
         settings.awaitServiceStopped()
+        dismissSystemPanels()
         DiveDeepState.setEnabled(context, false)
-        DiveDeepState.setTranslationConfig(context, TranslationConfig(llmdTarget = target))
+        DiveDeepState.setTranslationConfig(
+            context,
+            TranslationConfig(
+                llmdTarget = target,
+                model = arguments.getString("llmdModel") ?: DiveDeepState.DEFAULT_MODEL,
+            ),
+        )
         DiveDeepState.setPackageBlocked(context, FIXTURE_PACKAGE, false)
         authorizeLlmd(target, testName)
         settings.stopFixture()
@@ -88,6 +98,7 @@ internal class AndroidE2eEnvironment : TestRule {
             component = ComponentName(FIXTURE_PACKAGE, "$FIXTURE_PACKAGE.MainActivity")
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
             putExtra("test_title", title)
+            putExtra("test_scrollable", scrollableFixture)
         })
         requireObject(By.res(FIXTURE_PACKAGE, "title_text"))
         DiveDeepState.setEnabled(context, true)
@@ -97,7 +108,8 @@ internal class AndroidE2eEnvironment : TestRule {
     private fun authorizeLlmd(target: LlmdTarget, testName: String) {
         context.startActivity(Intent("com.storytellerf.llmd.action.AUTHORIZE_CALLER").apply {
             component = ComponentName(target.packageName, "com.storytellerf.llmd.LlmdIpcAuthorizationActivity")
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            // An interrupted case may have left an earlier authorization page in this task.
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             putExtra("caller_package", context.packageName)
         })
         check(requireObject(By.res(target.packageName, "ipc_authorization_package")).text == context.packageName)
@@ -105,23 +117,58 @@ internal class AndroidE2eEnvironment : TestRule {
         val allow = requireObject(selector)
         check(allow.isEnabled)
         device.takeScreenshot(File(artifactDirectory(testName), "authorization.png"))
-        allow.click()
+        clickAuthorizationAllow(target)
         check(device.wait(Until.gone(selector), UI_TIMEOUT)) { "LLMD authorization page did not close" }
+    }
+
+    private fun clickAuthorizationAllow(target: LlmdTarget) {
+        val automation = instrumentation.getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES)
+        val root = checkNotNull(automation.rootInActiveWindow)
+        check(root.packageName?.toString() == target.packageName)
+        val button = root.findAccessibilityNodeInfosByViewId("${target.packageName}:id/ipc_authorization_allow").single()
+        check(button.isVisibleToUser && button.isEnabled)
+        // A native click action does not depend on the dialog's changing screen inset offset.
+        check(button.performAction(AccessibilityNodeInfo.ACTION_CLICK)) { "LLMD authorization action was rejected" }
     }
 
     fun requireObject(selector: BySelector, timeout: Long = UI_TIMEOUT): UiObject2 =
         checkNotNull(device.wait(Until.findObject(selector), timeout)) { "UI element missing: $selector" }
 
-    fun translatedTitle(): UiObject2 = requireObject(By.desc("$title 已翻译"), MODEL_TIMEOUT)
+    fun translatedTitle(): UiObject2 = requireObject(By.pkg(appPackage).desc("$title 已翻译"), MODEL_TIMEOUT)
 
     fun disableService() = settings.disableService()
 
-    fun hasOverlayWindow(): Boolean = instrumentation
+    fun dismissSystemPanels() {
+        device.executeShellCommand("cmd statusbar collapse")
+        if (controlCenterFocused()) {
+            val x = device.displayWidth / 2
+            val start = (device.displayHeight * DISMISS_START).toInt()
+            val end = (device.displayHeight * DISMISS_END).toInt()
+            device.executeShellCommand("input swipe $x $start $x $end $SWIPE_DURATION")
+        }
+    }
+
+    fun controlCenterFocused(): Boolean = device.executeShellCommand("dumpsys window")
+        .lineSequence().any { it.contains("mCurrentFocus=") && it.contains("control_center") }
+
+    fun captureScreen(testName: String, stage: String) {
+        check(device.takeScreenshot(File(artifactDirectory(testName), "$stage.png")))
+    }
+
+    fun overlayWindowCount(): Int = instrumentation
         .getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES)
-        .windows.any { window ->
+        .windows.count { window ->
             window.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY &&
                 window.root?.packageName == context.packageName
         }
+
+    fun hasOverlayWindow(): Boolean = overlayWindowCount() > 0
+
+    fun translationSheetWindowId(): Int? = instrumentation
+        .getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES)
+        .windows.firstOrNull { window ->
+            window.root?.findAccessibilityNodeInfosByViewId("${context.packageName}:id/translation_sheet")?.isNotEmpty() == true
+        }?.id
 
     private fun artifactDirectory(testName: String) =
         File(context.getExternalFilesDir(null), "e2e/$runId/$testName").apply { mkdirs() }
@@ -138,5 +185,8 @@ internal class AndroidE2eEnvironment : TestRule {
         const val FIXTURE_PACKAGE = "com.storyteller_f.divedeep.fixture"
         const val UI_TIMEOUT = 15_000L
         const val MODEL_TIMEOUT = 180_000L
+        private const val DISMISS_START = 0.97
+        private const val DISMISS_END = 0.13
+        private const val SWIPE_DURATION = 500
     }
 }

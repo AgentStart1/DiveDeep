@@ -15,6 +15,7 @@ androidx-uiautomator = "2.4.0"
 androidx-composeTestManifest = "1.12.1"
 composeMultiplatform = "1.12.2"
 detekt = "2.0.0-alpha.6"
+easylauncher = "6.4.1"
 junit = "4.13.2"
 ksp = "2.3.12"
 kotlin = "2.4.21"
@@ -57,6 +58,7 @@ kotlinx-coroutinesTest = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-te
 wrappers-browser = { module = "org.jetbrains.kotlin-wrappers:kotlin-browser", version.ref = "kotlin-wrappers" }
 
 [plugins]
+easylauncher = { id = "com.starter.easylauncher", version.ref = "easylauncher" }
 androidApplication = { id = "com.android.application", version.ref = "agp" }
 androidMultiplatformLibrary = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }
 composeMultiplatform = { id = "org.jetbrains.compose", version.ref = "composeMultiplatform" }

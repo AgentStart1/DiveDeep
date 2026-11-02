@@ -19,14 +19,16 @@ Run the Android/Kotlin baseline from the repository root:
 ./gradlew detekt :shared:jvmTest :shared:testAndroidHostTest :androidApp:assembleDebug :androidApp:assembleDebugAndroidTest :androidTestFixture:assembleDebug --no-daemon
 ```
 
-After changing Android build tooling or settings fields, also build both release
-variants and inspect individual deprecations:
+After changing Android build tooling or settings fields, also build Alpha,
+Release and Daily and inspect individual deprecations:
 
 ```sh
-./gradlew :androidApp:assembleRelease :androidApp:assembleDaily --warning-mode all --no-daemon
+./gradlew :androidApp:assembleAlpha :androidApp:assembleRelease :androidApp:assembleDaily --warning-mode all --no-daemon
 ```
 
-Without signing credentials these builds produce unsigned APKs. For settings UI
+Release and Daily produce unsigned APKs without signing credentials. Alpha
+inherits release settings and uses the debug signing key when release credentials
+are absent. For settings UI
 verification, select the HTTP backend, edit the API key, save, and reopen settings
 to confirm persistence. The key must remain fully masked while typing and after
 saving; switching to llmd disables the field without clearing it.
@@ -48,6 +50,19 @@ readback. It also checks the direct provider query on the device without writing
 secure settings; failure cases use injected cursors and a recording command sink.
 
 ### Android end-to-end tests
+
+Debug installs as `com.storyteller_f.divedeep.debug` and Alpha as
+`com.storyteller_f.divedeep.alpha`. EasyLauncher adds red **DEBUG** and purple
+**ALPHA** ribbons to their launcher and round/adaptive icons. Release keeps the
+base application ID and original icon; the existing Daily variant remains
+`.daily`. Kotlin namespaces and component class names remain
+`com.storyteller_f.divedeep`.
+
+The host runner targets the suffixed Debug application and preserves coinstalled
+Release/legacy and Daily accessibility services. Recovery journals record their
+application ID; older journals without that field still recover the original
+unsuffixed package. Android test resource selectors use the target application's
+actual package rather than assuming it equals the Kotlin namespace.
 
 The Windows/Linux host runner `scripts/android_e2e.py` owns the whole run: APK preparation,
 a private pre-run snapshot, command trees, cancellation, restoration and reports.
@@ -92,6 +107,14 @@ leased device. Install LLMD with `com.storytellerf.llmd.action.BIND_IPC`, import
 `gemma-4-E2B-it.litertlm`, select it, switch the LLMD service on and wait for Ready.
 A model file on disk alone does not establish readiness.
 
+The native cases request `gemma-4-E2B-it` by default. To test a different already
+loaded model, set the Gradle project property
+`android.testInstrumentationRunnerArguments.llmdModel` to its exact LLMD model
+ID. When using the host runner, pass it through the standard
+`ORG_GRADLE_PROJECT_android.testInstrumentationRunnerArguments.llmdModel`
+environment variable so the host still owns preparation and restoration. The
+requested ID must match the model that is running, not just an imported file.
+
 Inside the lease, run:
 
 ```sh
@@ -111,7 +134,7 @@ An installed package without the required IPC service follows the same upgrade
 path as a missing package. Installation is followed by a fresh capability check;
 an unreadable capability response fails without authorizing an upgrade.
 
-`OverlayLlmdIntegrationTest` reports four independent contracts: translated fixture
+`OverlayLlmdIntegrationTest` covers translated fixture
 overlay, underlying-page interaction, actual source/result detail UI, and removal
 of buttons and open details after service destruction. Unique fixture titles
 require fresh real-model translations. Mock translation is disabled. Each case
@@ -119,6 +142,78 @@ opens the selected LLMD authorization page and verifies the caller package befor
 clicking Allow; real Binder translation establishes successful authorization.
 This authorization persists as before. The suite preserves other accessibility
 services with `FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES`.
+
+A separate recovery case in that suite covers Nubia's split control center. It
+opens the center with a right-edge pull-down, verifies that the focused system
+window is `control_center`, and dismisses it with an upward swipe. It checks both
+the returning page's translation and translation of newly changed text, and saves
+before/open/closed screenshots. This is distinct from the notification shade;
+the case is skipped on other manufacturers. Authorization setup clears earlier
+authorization pages, verifies the caller package, and invokes the visible native
+Allow button's accessibility click action. This avoids depending on dialog screen
+coordinates that can change with system insets.
+
+On Android 13 and later, translation buttons share one full-screen accessibility
+overlay window. Its touchable region is the union of the button bounds, so gaps
+continue to pass input to the underlying app. The translation detail sheet uses
+one additional window. This avoids creating dozens of independent system windows
+on dense surfaces such as the control center, which caused the tested Nubia device
+to terminate DiveDeep. Earlier Android versions retain the per-button window
+implementation because the public surface touch-region API is available from API
+33. The control-center test verifies the bounded window count on API 33+.
+Capture ignores accessibility-overlay events, including recently removed overlay
+windows, so button and detail updates do not restart translation. The detail
+window is updated in place rather than removed and re-added for each partial
+translation frame.
+
+Capture requests are deduplicated by window, package, text/bounds, translation
+configuration and target language. Repeated accessibility events for unchanged
+input must not reset a completed or in-flight translation. A failed request can
+retry on a later event; a stale failure cannot invalidate newer input. When the
+active root is an accessibility overlay, capture uses the focused application
+window beneath it. `TranslationRefreshGateTest` covers those request transitions.
+The real-model suite also keeps details open for five seconds, checking both the
+result and window identity, and separately checks closing and reopening details.
+Rendering retains successful results for unchanged source nodes while other page
+content changes. Removed nodes, changed source text and a changed target language
+cannot reuse those results; configuration changes clear the renderer. These
+transitions are covered by `TranslationFrameStateTest`. Model-free
+`TranslationSheetTest` checks long-content scrolling, fixed actions and in-place
+updates independently of real LLMD integration.
+On Android 11+, placement respects system-bar and display-cutout insets. Dense
+rows use neighboring columns so complete 48 dp touch targets remain disjoint;
+buttons with no free column are omitted instead of stacked. Pure placement tests
+cover edge columns, collisions and exhausted space, and the real-device suite
+checks that the visible fixture buttons have no intersecting touch bounds.
+The floating control uses an image button with a 24 dp visible surface inside its
+48 dp transparent touch target. A separate real-device case taps that transparent
+padding and verifies the expected source in the opened details, rather than
+testing only taps at the icon center.
+
+`TranslationRefreshController` publishes captured geometry on its serial
+coordination dispatcher independently of translation work. Replacing the screen
+or stopping cancels the old job without waiting for its backend; generation checks
+reject late frames and failures. Its shared tests include a backend that ignores
+cancellation. IPC bindings own both pending connection and response deferreds:
+disconnect, binding death, target changes and close fail pending responses, while
+caller cancellation removes its callback. `LlmdIpcLifecycleTest` exercises these
+connection boundaries without a model and remains separate from real IPC tests.
+
+For a real provider-death regression, hold the external device lease and run the
+separate suite with a loaded, ready model:
+
+```bash
+python scripts/android_e2e.py --device "$DEVICE" --llmd-variant debug --suite disconnect
+```
+
+This suite intentionally stops LLMD during a fresh uncached request, verifies
+immediate pending-call termination, then checks that controls follow actual page
+scrolling within five seconds. The fixture is explicitly made scrollable; the
+test checks source movement before testing overlay movement. It saves pending,
+provider-stopped and scrolled screenshots. Reload the LLMD model after this suite
+before reusing the device. The host still restores only its original DiveDeep and
+device snapshot; the intentional provider stop is an explicit suite side effect.
+The default `--suite overlay` retains the full normal real-model regression.
 
 The host sets an on-device run marker and supplies the matching `hostRunId`,
 `realLlmd=true`, `llmdVariant` and class/filter instrumentation arguments. Cases

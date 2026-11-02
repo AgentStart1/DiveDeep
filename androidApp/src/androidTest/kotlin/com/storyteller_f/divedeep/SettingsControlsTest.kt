@@ -37,6 +37,7 @@ class SettingsControlsTest(private val target: LlmdTarget) {
                 onPackageBlockedChange = { _, _ -> },
             )
         }
+        compose.onNodeWithText("翻译服务").performClick()
         selectRadio("本机 llmd IPC")
         selectRadio(target.displayName)
         compose.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("保存翻译配置"))
