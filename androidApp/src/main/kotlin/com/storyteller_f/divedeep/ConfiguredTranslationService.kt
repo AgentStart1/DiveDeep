@@ -34,6 +34,7 @@ class ConfiguredTranslationService(
         cachingService.translate(request)
 
     fun close() {
+        httpService.close()
         ipcService.close()
         translationCacheDatabase.close()
     }

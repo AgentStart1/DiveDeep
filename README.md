@@ -23,6 +23,11 @@ Open **应用排除** to choose apps that should not be translated. Checked apps
 excluded, and changes save automatically. **使用 Mock 翻译** is available under
 the translation service's development options for testing only.
 
+Text language is detected offline on the device. Only text identified as a
+different language from the system language gets a translation icon and is sent
+for translation. Regional variants of the same language are treated as the same;
+text whose language cannot be reliably identified is skipped.
+
 Tap a floating translation icon to open translation details. The sheet shows the
 translation first, with the source below it. Long content scrolls inside the
 sheet; **复制译文** copies the result and **关闭** returns to the page. The page

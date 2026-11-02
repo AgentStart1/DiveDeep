@@ -21,9 +21,16 @@ class MainActivity : Activity() {
             findViewById<TextView>(R.id.title_text).text = title
         }
         val primaryButton = findViewById<Button>(R.id.primary_button)
+        val english = intent.getBooleanExtra("test_english", false)
+        if (english) {
+            findViewById<TextView>(R.id.long_paragraph).text =
+                "This paragraph checks screen text capture, translation controls, and scrolling content updates."
+            primaryButton.text = "Start processing the order"
+            findViewById<Button>(R.id.secondary_button).text = "View the detailed instructions"
+        }
         primaryButton.setOnClickListener {
             primaryTapCount += 1
-            primaryButton.text = "已点击 $primaryTapCount 次"
+            primaryButton.text = if (english) "The button was clicked $primaryTapCount times" else "已点击 $primaryTapCount 次"
         }
     }
 

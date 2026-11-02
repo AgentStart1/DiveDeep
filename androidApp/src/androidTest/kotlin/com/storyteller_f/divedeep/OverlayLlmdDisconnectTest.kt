@@ -3,6 +3,7 @@ package com.storyteller_f.divedeep
 import android.graphics.Rect
 import androidx.test.uiautomator.By
 import java.util.UUID
+import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
@@ -24,8 +25,12 @@ class OverlayLlmdDisconnectTest {
         val started = countLog("IPC request started")
         val pending = By.pkg(environment.appPackage).descStartsWith(tag)
         val input = By.res(AndroidE2eEnvironment.FIXTURE_PACKAGE, "search_input")
-        environment.requireObject(input).text =
-            tag + " Explain this screen text in another language with all details preserved. ".repeat(LONG_TEXT_REPEATS)
+        val foreignText = if (Locale.getDefault().language == "en") {
+            " 请将这段屏幕上的文字翻译成系统语言，保留所有细节和完整内容。 "
+        } else {
+            " Explain this screen text in another language with all details preserved. "
+        }
+        environment.requireObject(input).text = tag + foreignText.repeat(LONG_TEXT_REPEATS)
         awaitCondition("An uncached real IPC request must start before killing LLMD") {
             countLog("IPC request started") > started
         }

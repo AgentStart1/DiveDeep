@@ -33,12 +33,16 @@ dependencies {
     implementation(libs.compose.ui)
     implementation(libs.compose.uiToolingPreview)
     implementation(libs.kotlinx.coroutinesAndroid)
+    implementation(libs.kotlinx.coroutinesPlayServices)
+    implementation(libs.mlkit.languageId)
+    implementation(libs.okhttp)
     debugImplementation(libs.compose.uiTooling)
     debugImplementation(libs.compose.uiTestManifest)
     androidTestImplementation(libs.compose.uiTestJunit4)
     androidTestImplementation(libs.androidx.testExt.junit)
     androidTestImplementation(libs.androidx.uiautomator)
     testImplementation(libs.kotlin.testJunit)
+    testImplementation(libs.okhttp.mockwebserver)
 }
 
 android {

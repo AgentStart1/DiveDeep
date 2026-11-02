@@ -190,9 +190,28 @@ The floating control uses an image button with a 24 dp visible surface inside it
 padding and verifies the expected source in the opened details, rather than
 testing only taps at the icon center.
 
-`TranslationRefreshController` publishes captured geometry on its serial
-coordination dispatcher independently of translation work. Replacing the screen
-or stopping cancels the old job without waiting for its backend; generation checks
+Android injects a bundled ML Kit language identifier into `TranslationRefreshController`.
+Detection runs on its own dispatcher before new nodes become visible or reach
+the translation backend. Same-language and undetermined nodes are excluded;
+comparison uses the primary language subtag, ignoring region and script variants,
+and maps Android Bokmål (`nb`) to ML Kit's Norwegian (`no`).
+Detection failures use the existing refresh failure/retry path. The accessibility
+service owns and closes the identifier. Shared controller tests inject a detector
+to cover filtering and cancellation without requiring the ML Kit model.
+`AndroidLanguageDetectorTest` checks the bundled model on a device. Real IPC
+fixtures choose English for a Chinese system language and Chinese otherwise,
+so the language gate still requires real foreign-text translation.
+
+`TranslationRefreshController` owns a cancellable job for each screen. Language
+detection runs on a separate dispatcher and publishes eligible geometry on the
+serial coordination dispatcher before dispatching translation work. A blocked
+old backend cannot prevent a new page from being detected or presented.
+`TranslationRefreshBlockingTest` covers this using real blocking host I/O.
+HTTP requests use asynchronous OkHttp calls; coroutine cancellation cancels the
+call through response-body consumption, and the owning service closes the client.
+`TranslationHttpCallTest` covers cancellation before headers and during body reads,
+including freeing a single per-host request slot for the next request.
+Replacing the screen or stopping cancels the old job without waiting for its backend; generation checks
 reject late frames and failures. Its shared tests include a backend that ignores
 cancellation. IPC bindings own both pending connection and response deferreds:
 disconnect, binding death, target changes and close fail pending responses, while

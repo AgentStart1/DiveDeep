@@ -22,6 +22,7 @@ class DiveDeepAccessibilityService : AccessibilityService() {
     private lateinit var refreshController: TranslationRefreshController
     private lateinit var accessibilityCaptureDriver: AndroidAccessibilityCaptureDriver
     private lateinit var translationService: ConfiguredTranslationService
+    private lateinit var languageDetector: AndroidLanguageDetector
     private lateinit var overlayRenderer: AndroidOverlayRenderer
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val settings = MutableStateFlow(DiveDeepSettings())
@@ -47,6 +48,7 @@ class DiveDeepAccessibilityService : AccessibilityService() {
         super.onCreate()
         accessibilityCaptureDriver = AndroidAccessibilityCaptureDriver(::contentRoot)
         overlayRenderer = AndroidOverlayRenderer(this)
+        languageDetector = AndroidLanguageDetector()
         translationService = ConfiguredTranslationService(this) {
             settings.value.translationConfig
         }
@@ -56,6 +58,8 @@ class DiveDeepAccessibilityService : AccessibilityService() {
             workerDispatcher = Dispatchers.IO.limitedParallelism(1),
             translationService = translationService,
             overlayRenderer = overlayRenderer,
+            languageDetector = languageDetector,
+            detectionDispatcher = Dispatchers.Default,
         )
         collectTranslationFailures()
         collectSettings()
@@ -99,6 +103,7 @@ class DiveDeepAccessibilityService : AccessibilityService() {
         serviceScope.cancel()
         overlayRenderer.close()
         translationService.close()
+        languageDetector.close()
         super.onDestroy()
     }
 

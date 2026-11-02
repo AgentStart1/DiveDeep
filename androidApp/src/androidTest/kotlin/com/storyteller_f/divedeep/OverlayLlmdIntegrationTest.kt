@@ -73,7 +73,8 @@ class OverlayLlmdIntegrationTest {
             By.pkg(environment.appPackage).desc("${environment.title} 已翻译"),
         ).contentDescription)
         environment.requireObject(By.res(AndroidE2eEnvironment.FIXTURE_PACKAGE, "primary_button")).click()
-        environment.requireObject(By.pkg(environment.appPackage).desc("已点击 1 次 已翻译"), AndroidE2eEnvironment.MODEL_TIMEOUT)
+        environment.requireObject(By.pkg(environment.appPackage).desc("${environment.clickedText(1)} 已翻译"),
+            AndroidE2eEnvironment.MODEL_TIMEOUT)
         assertTrue(environment.hasOverlayWindow())
     }
 
@@ -91,7 +92,7 @@ class OverlayLlmdIntegrationTest {
         repeat(2) { index ->
             environment.requireObject(By.res(AndroidE2eEnvironment.FIXTURE_PACKAGE, "primary_button")).click()
             environment.requireObject(By.res(AndroidE2eEnvironment.FIXTURE_PACKAGE, "primary_button")
-                .text("已点击 ${index + 1} 次"))
+                .text(environment.clickedText(index + 1)))
             assertTrue("Overlay must remain visible during the underlying interaction", environment.hasOverlayWindow())
         }
     }
