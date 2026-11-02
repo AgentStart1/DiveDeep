@@ -4,10 +4,11 @@ import com.storyteller_f.divedeep.shared.MockTranslationService
 import com.storyteller_f.divedeep.shared.TranslationItem
 import com.storyteller_f.divedeep.shared.TranslationRequest
 import com.storyteller_f.divedeep.shared.TranslationService
-import java.io.BufferedReader
-import java.io.OutputStreamWriter
-import java.net.HttpURLConnection
-import java.net.URL
+import java.util.concurrent.TimeUnit
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -15,6 +16,11 @@ class OpenAiTranslationService(
     private val configProvider: () -> TranslationConfig,
 ) : TranslationService {
     private val mockTranslationService = MockTranslationService()
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(180, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(false)
+        .build()
 
     override suspend fun translate(request: TranslationRequest): List<TranslationItem> {
         if (request.items.isEmpty()) return emptyList()
@@ -29,37 +35,22 @@ class OpenAiTranslationService(
         return OpenAiTranslationProtocol.toTranslationItems(request, translatedTexts)
     }
 
-    private fun requestTranslations(config: TranslationConfig, request: TranslationRequest): String {
-        val connection = (URL(chatCompletionsUrl(config.apiBaseUrl)).openConnection() as HttpURLConnection)
+    private suspend fun requestTranslations(config: TranslationConfig, request: TranslationRequest): String {
+        val payload = OpenAiTranslationProtocol.buildChatCompletionPayload(config, request).toString()
+        val httpRequest = Request.Builder()
+            .url(chatCompletionsUrl(config.apiBaseUrl))
+            .post(payload.toRequestBody("application/json; charset=utf-8".toMediaType()))
             .apply {
-                requestMethod = "POST"
-                connectTimeout = 60_000
-                readTimeout = 180_000
-                doOutput = true
-                setRequestProperty("Content-Type", "application/json")
-                config.apiKey.takeIf { it.isNotBlank() }?.let { apiKey ->
-                    setRequestProperty("Authorization", "Bearer $apiKey")
-                }
+                config.apiKey.takeIf { it.isNotBlank() }?.let { header("Authorization", "Bearer $it") }
             }
+            .build()
+        return client.newCall(httpRequest).awaitTranslationResponse()
+    }
 
-        val payload = OpenAiTranslationProtocol.buildChatCompletionPayload(config, request)
-
-        connection.outputStream.use { output ->
-            OutputStreamWriter(output, Charsets.UTF_8).use { writer ->
-                writer.write(payload.toString())
-            }
-        }
-
-        val responseCode = connection.responseCode
-        val body = if (responseCode in 200..299) {
-            connection.inputStream.bufferedReader(Charsets.UTF_8).use(BufferedReader::readText)
-        } else {
-            val errorBody = connection.errorStream?.bufferedReader(Charsets.UTF_8)?.use(BufferedReader::readText)
-                .orEmpty()
-            throw TranslationException("Translation API failed with HTTP $responseCode: $errorBody")
-        }
-
-        return body
+    fun close() {
+        client.dispatcher.cancelAll()
+        client.connectionPool.evictAll()
+        client.dispatcher.executorService.shutdown()
     }
 
     private fun chatCompletionsUrl(apiBaseUrl: String): String =

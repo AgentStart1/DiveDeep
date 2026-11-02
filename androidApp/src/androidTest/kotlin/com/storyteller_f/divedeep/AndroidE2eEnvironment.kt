@@ -13,6 +13,7 @@ import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
 import java.io.File
 import java.util.UUID
+import java.util.Locale
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -30,7 +31,14 @@ internal class AndroidE2eEnvironment(private val scrollableFixture: Boolean = fa
     private val runId get() = arguments.getString("hostRunId").orEmpty()
     lateinit var device: UiDevice
         private set
-    val title = "中文测试页面 ${UUID.randomUUID()}"
+    private val englishFixture = Locale.getDefault().language == "zh"
+    val title = if (englishFixture) {
+        "This page contains screen translation test content ${UUID.randomUUID()}"
+    } else {
+        "这是用于验证屏幕翻译功能的中文测试页面 ${UUID.randomUUID()}"
+    }
+
+    fun clickedText(count: Int): String = if (englishFixture) "The button was clicked $count times" else "已点击 $count 次"
 
     override fun apply(base: Statement, description: Description): Statement = object : Statement() {
         // JUnit4's synchronous Statement is the boundary for the suspending DataStore API.
@@ -98,6 +106,7 @@ internal class AndroidE2eEnvironment(private val scrollableFixture: Boolean = fa
             component = ComponentName(FIXTURE_PACKAGE, "$FIXTURE_PACKAGE.MainActivity")
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
             putExtra("test_title", title)
+            putExtra("test_english", englishFixture)
             putExtra("test_scrollable", scrollableFixture)
         })
         requireObject(By.res(FIXTURE_PACKAGE, "title_text"))
