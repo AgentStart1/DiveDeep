@@ -124,3 +124,8 @@ easylauncher {
         }
     }
 }
+
+// Include source icons in the cache key so resource-only changes regenerate ribbons.
+tasks.matching { it.name.startsWith("easylauncher") }.configureEach {
+    inputs.dir("src/main/res").withPathSensitivity(PathSensitivity.RELATIVE)
+}
